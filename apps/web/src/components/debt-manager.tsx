@@ -148,11 +148,21 @@ export function DebtManager({ people, defaultPeriod }: { people: Person[]; defau
       <Panel>
         <h2 className="text-base font-semibold text-white">Nova parcela</h2>
         <form onSubmit={submit} className="mt-4 space-y-3">
-          <PersonSelect people={people} value={form.personId} onChange={(personId) => setForm({ ...form, personId })} />
-          <Input type="month" value={form.invoiceMonth.slice(0, 7)} onChange={(event) => setForm({ ...form, invoiceMonth: `${event.target.value}-01` })} className="w-full" />
-          <Input type="month" value={form.paymentMonth.slice(0, 7)} onChange={(event) => setForm({ ...form, paymentMonth: `${event.target.value}-01` })} className="w-full" />
-          <Input placeholder="Valor" type="number" step="0.01" value={form.amount} onChange={(event) => setForm({ ...form, amount: event.target.value })} className="w-full" />
-          <Input placeholder="Descricao" value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} className="w-full" />
+          <Field label="Pessoa">
+            <PersonSelect people={people} value={form.personId} onChange={(personId) => setForm({ ...form, personId })} />
+          </Field>
+          <Field label="Mes da fatura" description="Competencia usada no PV.">
+            <Input type="month" value={form.invoiceMonth.slice(0, 7)} onChange={(event) => setForm({ ...form, invoiceMonth: `${event.target.value}-01` })} className="w-full" />
+          </Field>
+          <Field label="Mes de pagamento" description="Vencimento usado na fatura do mes.">
+            <Input type="month" value={form.paymentMonth.slice(0, 7)} onChange={(event) => setForm({ ...form, paymentMonth: `${event.target.value}-01` })} className="w-full" />
+          </Field>
+          <Field label="Valor">
+            <Input placeholder="Valor" type="number" step="0.01" value={form.amount} onChange={(event) => setForm({ ...form, amount: event.target.value })} className="w-full" />
+          </Field>
+          <Field label="Descricao">
+            <Input placeholder="Descricao" value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} className="w-full" />
+          </Field>
           <Button type="submit" disabled={isSubmitting || !form.personId || !form.amount}>
             <Plus className="h-4 w-4" />
             {isSubmitting ? "Adicionando" : "Adicionar"}
@@ -163,13 +173,16 @@ export function DebtManager({ people, defaultPeriod }: { people: Person[]; defau
       <Panel>
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h2 className="text-base font-semibold text-white">Fluxos de {period}</h2>
+            <h2 className="text-base font-semibold text-white">Fatura {period}</h2>
             <p className="text-sm text-slate-400">
-              Nominal {currency(summary.nominalTotal)} - PV {currency(summary.presentValueTotal)} - Float {currency(summary.floatGain)}
+              Nominal {currency(summary.nominalTotal)} - PV {currency(summary.presentValueTotal)} - Fatura do mes {currency(summary.monthlyInvoiceTotal)} - Float {currency(summary.floatGain)}
             </p>
           </div>
           <div className="flex items-center gap-2">
-            <Input type="month" value={period} onChange={(event) => setPeriod(event.target.value)} />
+            <label className="grid gap-1 text-xs font-medium text-slate-400">
+              Mes da fatura
+              <Input type="month" value={period} onChange={(event) => setPeriod(event.target.value)} />
+            </label>
             <button type="button" onClick={() => void load()} className="focus-ring rounded-md border border-line p-2 text-slate-300" aria-label="Atualizar dividas">
               <RefreshCw className="h-4 w-4" />
             </button>
@@ -182,13 +195,23 @@ export function DebtManager({ people, defaultPeriod }: { people: Person[]; defau
               <div key={flow.id} className="rounded-md border border-line bg-ink p-3">
                 {isEditing ? (
                   <div className="space-y-2">
-                    <PersonSelect people={people} value={editForm.personId} onChange={(personId) => setEditForm({ ...editForm, personId })} />
+                    <Field label="Pessoa">
+                      <PersonSelect people={people} value={editForm.personId} onChange={(personId) => setEditForm({ ...editForm, personId })} />
+                    </Field>
                     <div className="grid grid-cols-2 gap-2">
-                      <Input type="month" value={editForm.invoiceMonth.slice(0, 7)} onChange={(event) => setEditForm({ ...editForm, invoiceMonth: `${event.target.value}-01` })} className="w-full" />
-                      <Input type="month" value={editForm.paymentMonth.slice(0, 7)} onChange={(event) => setEditForm({ ...editForm, paymentMonth: `${event.target.value}-01` })} className="w-full" />
+                      <Field label="Fatura">
+                        <Input type="month" value={editForm.invoiceMonth.slice(0, 7)} onChange={(event) => setEditForm({ ...editForm, invoiceMonth: `${event.target.value}-01` })} className="w-full" />
+                      </Field>
+                      <Field label="Pagamento">
+                        <Input type="month" value={editForm.paymentMonth.slice(0, 7)} onChange={(event) => setEditForm({ ...editForm, paymentMonth: `${event.target.value}-01` })} className="w-full" />
+                      </Field>
                     </div>
-                    <Input type="number" step="0.01" value={editForm.amount} onChange={(event) => setEditForm({ ...editForm, amount: event.target.value })} className="w-full" />
-                    <Input value={editForm.description} onChange={(event) => setEditForm({ ...editForm, description: event.target.value })} className="w-full" />
+                    <Field label="Valor">
+                      <Input type="number" step="0.01" value={editForm.amount} onChange={(event) => setEditForm({ ...editForm, amount: event.target.value })} className="w-full" />
+                    </Field>
+                    <Field label="Descricao">
+                      <Input value={editForm.description} onChange={(event) => setEditForm({ ...editForm, description: event.target.value })} className="w-full" />
+                    </Field>
                     <div className="flex justify-end gap-2">
                       <IconButton label="Salvar fluxo no card" disabled={savingId === flow.id || !editForm.amount} onClick={() => void saveFlow(flow.id)}>
                         <Save className="h-4 w-4" />
@@ -203,7 +226,7 @@ export function DebtManager({ people, defaultPeriod }: { people: Person[]; defau
                     <div className="flex items-start justify-between gap-3">
                       <div>
                         <div className="text-sm font-semibold text-white">{flow.person.name}</div>
-                        <div className="mt-1 text-xs text-slate-500">{flow.invoiceMonth.slice(0, 7)} &gt; {flow.paymentMonth.slice(0, 7)}</div>
+                        <div className="mt-1 text-xs text-slate-500">Fatura {flow.invoiceMonth.slice(0, 7)} - pagamento {flow.paymentMonth.slice(0, 7)}</div>
                       </div>
                       <div className="text-right text-sm font-semibold text-white">{currency(Number(flow.amount))}</div>
                     </div>
@@ -227,8 +250,8 @@ export function DebtManager({ people, defaultPeriod }: { people: Person[]; defau
             <thead className="text-left text-xs uppercase tracking-[0.12em] text-slate-500">
               <tr>
                 <th className="py-2">Pessoa</th>
-                <th>Fatura</th>
-                <th>Vencimento</th>
+                <th>Mes da fatura</th>
+                <th>Mes de pagamento</th>
                 <th>Valor</th>
                 <th>Descricao</th>
                 <th className="text-right">Acoes</th>
@@ -342,4 +365,14 @@ async function apiErrorMessage(response: Response, fallback: string) {
   } catch {
     return fallback;
   }
+}
+
+function Field({ children, description, label }: { children: React.ReactNode; description?: string; label: string }) {
+  return (
+    <label className="block">
+      <span className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">{label}</span>
+      {description ? <span className="ml-2 text-xs text-slate-500">{description}</span> : null}
+      <div className="mt-1">{children}</div>
+    </label>
+  );
 }

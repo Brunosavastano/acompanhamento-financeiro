@@ -53,3 +53,18 @@ textarea {
 .focus-ring {
   @apply focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan;
 }
+
+.recharts-default-tooltip {
+  background-color: #0b1220 !important;
+  border: 1px solid #22314b !important;
+  color: #e7eefc !important;
+}
+
+.recharts-tooltip-wrapper,
+.recharts-tooltip-label,
+.recharts-tooltip-item,
+.recharts-tooltip-item-name,
+.recharts-tooltip-item-value,
+.recharts-tooltip-item-separator {
+  color: #e7eefc !important;
+}
