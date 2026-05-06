@@ -1,5 +1,6 @@
 "use client";
 
+import type { CSSProperties } from "react";
 import {
   Area,
   AreaChart,
@@ -19,6 +20,15 @@ import { currency, number, percent } from "@/lib/format";
 type ChartPoint = Record<string, string | number>;
 
 const colors = ["#35d8ff", "#58f28a", "#ff4f91", "#ffb84d"];
+const tooltipContentStyle: CSSProperties = {
+  backgroundColor: "#0b1220",
+  border: "1px solid #22314b",
+  borderRadius: 8,
+  color: "#e7eefc",
+  boxShadow: "0 18px 60px rgba(0, 0, 0, 0.35)",
+};
+const tooltipLabelStyle: CSSProperties = { color: "#e7eefc", fontWeight: 600 };
+const tooltipItemStyle: CSSProperties = { color: "#e7eefc" };
 
 export function NetWorthChart({ data }: { data: ChartPoint[] }) {
   return (
@@ -33,7 +43,12 @@ export function NetWorthChart({ data }: { data: ChartPoint[] }) {
         <CartesianGrid stroke="#22314b" strokeDasharray="3 3" />
         <XAxis dataKey="month" stroke="#94a3b8" tickLine={false} axisLine={false} />
         <YAxis stroke="#94a3b8" tickLine={false} axisLine={false} tickFormatter={(value) => currency(Number(value)).replace(",00", "")} />
-        <Tooltip contentStyle={{ background: "#0b1220", border: "1px solid #22314b", borderRadius: 8 }} formatter={(value) => currency(Number(value))} />
+        <Tooltip
+          contentStyle={tooltipContentStyle}
+          labelStyle={tooltipLabelStyle}
+          itemStyle={tooltipItemStyle}
+          formatter={(value) => currency(Number(value))}
+        />
         <Area type="monotone" dataKey="value" stroke="#35d8ff" fill="url(#netWorth)" strokeWidth={2} />
       </AreaChart>
     </ResponsiveContainer>
@@ -49,7 +64,12 @@ export function CompositionChart({ data }: { data: ChartPoint[] }) {
             <Cell key={index} fill={colors[index % colors.length]} />
           ))}
         </Pie>
-        <Tooltip contentStyle={{ background: "#0b1220", border: "1px solid #22314b", borderRadius: 8 }} formatter={(value) => currency(Number(value))} />
+        <Tooltip
+          contentStyle={tooltipContentStyle}
+          labelStyle={tooltipLabelStyle}
+          itemStyle={tooltipItemStyle}
+          formatter={(value) => currency(Number(value))}
+        />
       </PieChart>
     </ResponsiveContainer>
   );
@@ -62,7 +82,12 @@ export function VariationChart({ data }: { data: ChartPoint[] }) {
         <CartesianGrid stroke="#22314b" strokeDasharray="3 3" />
         <XAxis dataKey="month" stroke="#94a3b8" tickLine={false} axisLine={false} />
         <YAxis stroke="#94a3b8" tickLine={false} axisLine={false} tickFormatter={(value) => currency(Number(value)).replace(",00", "")} />
-        <Tooltip contentStyle={{ background: "#0b1220", border: "1px solid #22314b", borderRadius: 8 }} formatter={(value) => currency(Number(value))} />
+        <Tooltip
+          contentStyle={tooltipContentStyle}
+          labelStyle={tooltipLabelStyle}
+          itemStyle={tooltipItemStyle}
+          formatter={(value) => currency(Number(value))}
+        />
         <Bar dataKey="value" radius={[4, 4, 0, 0]}>
           {data.map((entry, index) => (
             <Cell key={index} fill={Number(entry.value) >= 0 ? "#58f28a" : "#ff4f91"} />
@@ -80,7 +105,12 @@ export function RatioChart({ data, dataKey = "value", formatter = percent }: { d
         <CartesianGrid stroke="#22314b" strokeDasharray="3 3" />
         <XAxis dataKey="month" stroke="#94a3b8" tickLine={false} axisLine={false} />
         <YAxis stroke="#94a3b8" tickLine={false} axisLine={false} tickFormatter={(value) => formatter(Number(value))} />
-        <Tooltip contentStyle={{ background: "#0b1220", border: "1px solid #22314b", borderRadius: 8 }} formatter={(value) => formatter(Number(value))} />
+        <Tooltip
+          contentStyle={tooltipContentStyle}
+          labelStyle={tooltipLabelStyle}
+          itemStyle={tooltipItemStyle}
+          formatter={(value) => formatter(Number(value))}
+        />
         <Area type="monotone" dataKey={dataKey} stroke="#ffb84d" fill="#ffb84d33" strokeWidth={2} />
       </AreaChart>
     </ResponsiveContainer>
