@@ -1,0 +1,35 @@
+{
+  "name": "acompanhamento-financeiro",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev -w apps/web",
+    "dev:local": "node scripts/dev-local.mjs",
+    "build": "npm run build -w apps/web",
+    "lint": "npm run lint -w apps/web",
+    "test": "npm run test --workspaces --if-present",
+    "test:api": "npm run test:api -w apps/web",
+    "test:e2e": "npm run test:e2e -w apps/web",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "db:embedded": "npm run db:embedded -w apps/web",
+    "db:seed-if-empty": "npm run db:seed-if-empty -w apps/web",
+    "prisma:generate": "npm run prisma:generate -w apps/web",
+    "prisma:migrate": "npm run prisma:migrate -w apps/web",
+    "prisma:migrate:deploy": "npm run prisma:migrate:deploy -w apps/web",
+    "prisma:seed": "npm run prisma:seed -w apps/web",
+    "excel:verify": "npm run excel:verify -w apps/web",
+    "excel:import": "npm run excel:import -w apps/web",
+    "db:up": "docker compose up -d",
+    "db:setup": "npm run prisma:generate && npm run prisma:migrate && npm run prisma:seed",
+    "bootstrap": "npm run db:setup && npm run excel:import",
+    "prod:check": "node scripts/check-production-readiness.mjs"
+  },
+  "devDependencies": {
+    "prettier": "^3.3.3",
+    "typescript": "^5.6.3"
+  }
+}
