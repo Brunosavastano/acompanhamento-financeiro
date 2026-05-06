@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { auth } from "@/auth";
+import { BrandLogo } from "@/components/brand-logo";
 import { SignOutButton } from "@/components/sign-out-button";
 import {
   BarChart3,
@@ -33,7 +34,7 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
     <div className="min-h-screen bg-ink text-slate-100">
       <aside className="fixed inset-y-0 left-0 z-20 hidden w-72 border-r border-line bg-panel/95 px-4 py-5 lg:block">
         <Link href="/dashboard" className="flex items-center gap-3 px-2">
-          <div className="grid h-10 w-10 place-items-center rounded-md bg-cyan text-sm font-black text-ink">AF</div>
+          <BrandLogo />
           <div>
             <div className="text-sm font-semibold text-white">Financeiro Familiar</div>
             <div className="text-xs text-slate-400">Familia Savastano</div>
@@ -61,7 +62,7 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
         <header className="sticky top-0 z-10 border-b border-line bg-ink/90 px-4 py-3 backdrop-blur lg:hidden">
           <div className="flex items-center justify-between">
             <Link href="/dashboard" className="flex items-center gap-2 text-sm font-semibold text-white">
-              <span className="grid h-8 w-8 place-items-center rounded-md bg-cyan text-xs font-black text-ink">AF</span>
+              <BrandLogo size="sm" />
               Financeiro
             </Link>
             <SignOutButton compact />
