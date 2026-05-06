@@ -36,8 +36,8 @@ export function DebtManager({ people, defaultPeriod }: { people: Person[]; defau
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [form, setForm] = useState<FlowForm>({
     personId: people[0]?.id ?? "",
-    invoiceMonth: `${defaultPeriod}-01`,
-    paymentMonth: `${defaultPeriod}-01`,
+    invoiceMonth: `${period}-01`,
+    paymentMonth: monthAfter(defaultPeriod),
     amount: "",
     description: "",
   });
@@ -60,6 +60,12 @@ export function DebtManager({ people, defaultPeriod }: { people: Person[]; defau
 
   useEffect(() => {
     void load();
+    const baseMonth = `${period}-01`;
+    setForm((current) => ({
+      ...current,
+      invoiceMonth: baseMonth,
+      paymentMonth: current.paymentMonth < baseMonth ? monthAfter(period) : current.paymentMonth,
+    }));
   }, [period]);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
@@ -151,10 +157,7 @@ export function DebtManager({ people, defaultPeriod }: { people: Person[]; defau
           <Field label="Pessoa">
             <PersonSelect people={people} value={form.personId} onChange={(personId) => setForm({ ...form, personId })} />
           </Field>
-          <Field label="Mes da fatura" description="Competencia usada no PV.">
-            <Input type="month" value={form.invoiceMonth.slice(0, 7)} onChange={(event) => setForm({ ...form, invoiceMonth: `${event.target.value}-01` })} className="w-full" />
-          </Field>
-          <Field label="Mes de pagamento" description="Vencimento usado na fatura do mes.">
+          <Field label="Mes de vencimento" description="Valor total da fatura/cartao naquele mes.">
             <Input type="month" value={form.paymentMonth.slice(0, 7)} onChange={(event) => setForm({ ...form, paymentMonth: `${event.target.value}-01` })} className="w-full" />
           </Field>
           <Field label="Valor">
@@ -173,14 +176,14 @@ export function DebtManager({ people, defaultPeriod }: { people: Person[]; defau
       <Panel>
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h2 className="text-base font-semibold text-white">Fatura {period}</h2>
+            <h2 className="text-base font-semibold text-white">Divida base {period}</h2>
             <p className="text-sm text-slate-400">
-              Nominal {currency(summary.nominalTotal)} - PV {currency(summary.presentValueTotal)} - Fatura do mes {currency(summary.monthlyInvoiceTotal)} - Float {currency(summary.floatGain)}
+              Nominal {currency(summary.nominalTotal)} - Valor presente {currency(summary.presentValueTotal)} - Float {currency(summary.floatGain)}
             </p>
           </div>
           <div className="flex items-center gap-2">
             <label className="grid gap-1 text-xs font-medium text-slate-400">
-              Mes da fatura
+              Mes-base do calculo
               <Input type="month" value={period} onChange={(event) => setPeriod(event.target.value)} />
             </label>
             <button type="button" onClick={() => void load()} className="focus-ring rounded-md border border-line p-2 text-slate-300" aria-label="Atualizar dividas">
@@ -198,14 +201,9 @@ export function DebtManager({ people, defaultPeriod }: { people: Person[]; defau
                     <Field label="Pessoa">
                       <PersonSelect people={people} value={editForm.personId} onChange={(personId) => setEditForm({ ...editForm, personId })} />
                     </Field>
-                    <div className="grid grid-cols-2 gap-2">
-                      <Field label="Fatura">
-                        <Input type="month" value={editForm.invoiceMonth.slice(0, 7)} onChange={(event) => setEditForm({ ...editForm, invoiceMonth: `${event.target.value}-01` })} className="w-full" />
-                      </Field>
-                      <Field label="Pagamento">
-                        <Input type="month" value={editForm.paymentMonth.slice(0, 7)} onChange={(event) => setEditForm({ ...editForm, paymentMonth: `${event.target.value}-01` })} className="w-full" />
-                      </Field>
-                    </div>
+                    <Field label="Mes de vencimento">
+                      <Input type="month" value={editForm.paymentMonth.slice(0, 7)} onChange={(event) => setEditForm({ ...editForm, paymentMonth: `${event.target.value}-01` })} className="w-full" />
+                    </Field>
                     <Field label="Valor">
                       <Input type="number" step="0.01" value={editForm.amount} onChange={(event) => setEditForm({ ...editForm, amount: event.target.value })} className="w-full" />
                     </Field>
@@ -226,7 +224,7 @@ export function DebtManager({ people, defaultPeriod }: { people: Person[]; defau
                     <div className="flex items-start justify-between gap-3">
                       <div>
                         <div className="text-sm font-semibold text-white">{flow.person.name}</div>
-                        <div className="mt-1 text-xs text-slate-500">Fatura {flow.invoiceMonth.slice(0, 7)} - pagamento {flow.paymentMonth.slice(0, 7)}</div>
+                        <div className="mt-1 text-xs text-slate-500">Vencimento {flow.paymentMonth.slice(0, 7)}</div>
                       </div>
                       <div className="text-right text-sm font-semibold text-white">{currency(Number(flow.amount))}</div>
                     </div>
@@ -250,8 +248,7 @@ export function DebtManager({ people, defaultPeriod }: { people: Person[]; defau
             <thead className="text-left text-xs uppercase tracking-[0.12em] text-slate-500">
               <tr>
                 <th className="py-2">Pessoa</th>
-                <th>Mes da fatura</th>
-                <th>Mes de pagamento</th>
+                <th>Mes de vencimento</th>
                 <th>Valor</th>
                 <th>Descricao</th>
                 <th className="text-right">Acoes</th>
@@ -264,13 +261,6 @@ export function DebtManager({ people, defaultPeriod }: { people: Person[]; defau
                   <tr key={flow.id}>
                     <td className="py-2 text-slate-300">
                       {isEditing ? <PersonSelect people={people} value={editForm.personId} onChange={(personId) => setEditForm({ ...editForm, personId })} /> : flow.person.name}
-                    </td>
-                    <td className="text-slate-400">
-                      {isEditing ? (
-                        <Input type="month" value={editForm.invoiceMonth.slice(0, 7)} onChange={(event) => setEditForm({ ...editForm, invoiceMonth: `${event.target.value}-01` })} className="w-36" />
-                      ) : (
-                        flow.invoiceMonth.slice(0, 7)
-                      )}
                     </td>
                     <td className="text-slate-400">
                       {isEditing ? (
@@ -312,7 +302,7 @@ export function DebtManager({ people, defaultPeriod }: { people: Person[]; defau
             </tbody>
           </table>
         </div>
-        {flows.length === 0 ? <p className="py-6 text-center text-sm text-slate-500">Nenhuma parcela para este mes.</p> : null}
+        {flows.length === 0 ? <p className="py-6 text-center text-sm text-slate-500">Nenhuma divida futura para este mes-base.</p> : null}
       </Panel>
     </div>
   );
@@ -375,4 +365,10 @@ function Field({ children, description, label }: { children: React.ReactNode; de
       <div className="mt-1">{children}</div>
     </label>
   );
+}
+
+function monthAfter(period: string) {
+  const [year, month] = period.slice(0, 7).split("-").map(Number);
+  const date = new Date(Date.UTC(year, month, 1));
+  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}-01`;
 }

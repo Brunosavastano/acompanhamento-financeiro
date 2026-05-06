@@ -84,8 +84,7 @@ test.describe.serial("private finance app", () => {
     await expect(page.getByRole("heading", { name: "Dividas" })).toBeVisible();
 
     const form = page.locator("form").first();
-    await form.locator('input[type="month"]').nth(0).fill("2098-02");
-    await form.locator('input[type="month"]').nth(1).fill("2098-03");
+    await form.locator('input[type="month"]').fill("2098-03");
     await form.getByPlaceholder("Valor").fill("1000");
     await form.getByPlaceholder("Descricao").fill("Divida e2e");
     await form.getByRole("button", { name: "Adicionar" }).click();

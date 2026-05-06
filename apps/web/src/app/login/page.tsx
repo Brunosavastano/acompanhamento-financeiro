@@ -1,3 +1,4 @@
+import Image from "next/image";
 import { redirect } from "next/navigation";
 import { auth } from "@/auth";
 import { BrandLogo } from "@/components/brand-logo";
@@ -15,8 +16,20 @@ export default async function LoginPage() {
             <BrandLogo size="lg" />
             <span className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-300">Acompanhamento Financeiro</span>
           </div>
-          <div className="max-w-xl py-16">
-            <h1 className="text-4xl font-semibold leading-tight text-white sm:text-5xl">
+          <div className="flex flex-1 flex-col justify-center py-8">
+            <div className="relative mx-auto w-full max-w-[300px] overflow-hidden rounded-lg border border-line bg-panel2/40 shadow-glow sm:max-w-[340px]">
+              <Image
+                src="/savastano-crest.png"
+                alt="Brasao Savastano"
+                width={700}
+                height={875}
+                priority
+                className="h-auto w-full object-contain"
+              />
+            </div>
+          </div>
+          <div className="max-w-xl pb-8">
+            <h1 className="text-3xl font-semibold leading-tight text-white sm:text-4xl">
               Fechamento financeiro familiar, sem copiar celulas.
             </h1>
             <p className="mt-5 text-base leading-7 text-slate-300">
