@@ -68,112 +68,115 @@ export async function runExcelImport(input: { householdId: string; filePath: str
     const earliestMonth = sourceRows[0].periodMonth;
     const latestMonth = sourceRows[sourceRows.length - 1].periodMonth;
 
-    await prisma.$transaction(async (tx) => {
-      const people = await tx.person.findMany({ where: { householdId: input.householdId }, include: { accounts: true } });
-      const peopleByName = new Map(people.map((person) => [person.name.toLowerCase(), person]));
-      const accountsByKey = new Map(
-        people.flatMap((person) => person.accounts.map((account) => [`${person.name}:${account.name}`, account] as const)),
-      );
+    await prisma.$transaction(
+      async (tx) => {
+        const people = await tx.person.findMany({ where: { householdId: input.householdId }, include: { accounts: true } });
+        const peopleByName = new Map(people.map((person) => [person.name.toLowerCase(), person]));
+        const accountsByKey = new Map(
+          people.flatMap((person) => person.accounts.map((account) => [`${person.name}:${account.name}`, account] as const)),
+        );
 
-      await tx.budgetItem.deleteMany({ where: { householdId: input.householdId } });
-      await tx.goalProgressSnapshot.deleteMany({ where: { goal: { householdId: input.householdId } } });
-      await tx.goal.deleteMany({ where: { householdId: input.householdId } });
-      await tx.debtCashflow.deleteMany({ where: { householdId: input.householdId, source: "import" } });
+        await tx.budgetItem.deleteMany({ where: { householdId: input.householdId } });
+        await tx.goalProgressSnapshot.deleteMany({ where: { goal: { householdId: input.householdId } } });
+        await tx.goal.deleteMany({ where: { householdId: input.householdId } });
+        await tx.debtCashflow.deleteMany({ where: { householdId: input.householdId, source: "import" } });
 
-      for (const row of sourceRows) {
-        const snapshot = await tx.monthlySnapshot.upsert({
-          where: {
-            householdId_periodMonth_revisionNumber: {
+        for (const row of sourceRows) {
+          const snapshot = await tx.monthlySnapshot.upsert({
+            where: {
+              householdId_periodMonth_revisionNumber: {
+                householdId: input.householdId,
+                periodMonth: row.periodMonth,
+                revisionNumber: 1,
+              },
+            },
+            create: {
               householdId: input.householdId,
               periodMonth: row.periodMonth,
+              status: "closed",
+              selicAnnual: row.selicAnnual,
+              closedAt: new Date(),
               revisionNumber: 1,
+              notes: "Importado da planilha inicial.",
             },
-          },
-          create: {
-            householdId: input.householdId,
-            periodMonth: row.periodMonth,
-            status: "closed",
-            selicAnnual: row.selicAnnual,
-            closedAt: new Date(),
-            revisionNumber: 1,
-            notes: "Importado da planilha inicial.",
-          },
-          update: {
-            status: "closed",
-            selicAnnual: row.selicAnnual,
-            closedAt: new Date(),
-            notes: "Reimportado da planilha inicial.",
-          },
-        });
+            update: {
+              status: "closed",
+              selicAnnual: row.selicAnnual,
+              closedAt: new Date(),
+              notes: "Reimportado da planilha inicial.",
+            },
+          });
 
-        await tx.position.deleteMany({ where: { snapshotId: snapshot.id, source: "import" } });
+          await tx.position.deleteMany({ where: { snapshotId: snapshot.id, source: "import" } });
 
-        for (const definition of accountMap) {
-          const person = peopleByName.get(definition.person.toLowerCase());
-          const account = accountsByKey.get(`${definition.person}:${definition.account}`);
-          if (!person || !account) continue;
-          const amount = toNumber(rowRawByPeriod(balancetes, row.periodMonth)?.[definition.column]);
-          await tx.position.create({
-            data: {
-              snapshotId: snapshot.id,
-              personId: person.id,
-              accountId: account.id,
-              category: definition.category,
-              amount,
+          for (const definition of accountMap) {
+            const person = peopleByName.get(definition.person.toLowerCase());
+            const account = accountsByKey.get(`${definition.person}:${definition.account}`);
+            if (!person || !account) continue;
+            const amount = toNumber(rowRawByPeriod(balancetes, row.periodMonth)?.[definition.column]);
+            await tx.position.create({
+              data: {
+                snapshotId: snapshot.id,
+                personId: person.id,
+                accountId: account.id,
+                category: definition.category,
+                amount,
+                source: "import",
+              },
+            });
+          }
+
+          await tx.interestRate.upsert({
+            where: { householdId_periodMonth_rateType: { householdId: input.householdId, periodMonth: row.periodMonth, rateType: "selic_annual" } },
+            create: {
+              householdId: input.householdId,
+              periodMonth: row.periodMonth,
+              rateType: "selic_annual",
+              annualRate: row.selicAnnual,
+              source: "import",
+            },
+            update: {
+              annualRate: row.selicAnnual,
               source: "import",
             },
           });
         }
 
-        await tx.interestRate.upsert({
-          where: { householdId_periodMonth_rateType: { householdId: input.householdId, periodMonth: row.periodMonth, rateType: "selic_annual" } },
-          create: {
-            householdId: input.householdId,
-            periodMonth: row.periodMonth,
-            rateType: "selic_annual",
-            annualRate: row.selicAnnual,
-            source: "import",
-          },
-          update: {
-            annualRate: row.selicAnnual,
-            source: "import",
-          },
-        });
-      }
+        const debtCashflows = parseDebtCashflows(debtRows, peopleByName);
+        if (debtCashflows.length) {
+          await tx.debtCashflow.createMany({
+            data: debtCashflows.map((flow) => ({
+              householdId: input.householdId,
+              personId: flow.personId,
+              cardName: "Cartao principal",
+              invoiceMonth: flow.invoiceMonth,
+              paymentMonth: flow.paymentMonth,
+              amount: flow.amount,
+              description: "Parcela importada da matriz de dividas",
+              source: "import" as const,
+            })),
+          });
+        }
 
-      const debtCashflows = parseDebtCashflows(debtRows, peopleByName);
-      if (debtCashflows.length) {
-        await tx.debtCashflow.createMany({
-          data: debtCashflows.map((flow) => ({
-            householdId: input.householdId,
-            personId: flow.personId,
-            cardName: "Cartao principal",
-            invoiceMonth: flow.invoiceMonth,
-            paymentMonth: flow.paymentMonth,
-            amount: flow.amount,
-            description: "Parcela importada da matriz de dividas",
-            source: "import" as const,
-          })),
-        });
-      }
+        const budgetItems = parseBudgetItems(budgetRows, peopleByName, earliestMonth, input.householdId);
+        if (budgetItems.length) await tx.budgetItem.createMany({ data: budgetItems });
 
-      const budgetItems = parseBudgetItems(budgetRows, peopleByName, earliestMonth, input.householdId);
-      if (budgetItems.length) await tx.budgetItem.createMany({ data: budgetItems });
-
-      const goals = parseGoals(goalRows, input.householdId);
-      for (const goal of goals) {
-        const created = await tx.goal.create({ data: goal.goal });
-        await tx.goalProgressSnapshot.create({
-          data: {
-            goalId: created.id,
-            periodMonth: latestMonth,
-            currentValue: goal.currentValue,
-            progressPct: goal.progressPct,
-            status: goal.progressPct >= 1 ? "achieved" : goal.progressPct < 0.5 ? "attention" : "in_progress",
-          },
-        });
-      }
-    });
+        const goals = parseGoals(goalRows, input.householdId);
+        for (const goal of goals) {
+          const created = await tx.goal.create({ data: goal.goal });
+          await tx.goalProgressSnapshot.create({
+            data: {
+              goalId: created.id,
+              periodMonth: latestMonth,
+              currentValue: goal.currentValue,
+              progressPct: goal.progressPct,
+              status: goal.progressPct >= 1 ? "achieved" : goal.progressPct < 0.5 ? "attention" : "in_progress",
+            },
+          });
+        }
+      },
+      { maxWait: 15000, timeout: 120000 },
+    );
 
     await reconcileImport(job.id, input.householdId, sourceRows);
 
