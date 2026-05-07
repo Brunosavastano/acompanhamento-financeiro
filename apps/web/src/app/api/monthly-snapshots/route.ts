@@ -37,8 +37,8 @@ export async function POST(request: Request) {
         {
           error:
             existing.status === "draft"
-              ? "Ja existe um rascunho para este mes. Selecione-o em fechamentos existentes."
-              : "Este mes ja foi fechado. Crie uma revisao a partir do fechamento existente.",
+              ? "Já existe um rascunho para este mês. Selecione-o em fechamentos existentes."
+              : "Este mês já foi fechado. Crie uma revisão a partir do fechamento existente.",
         },
         { status: 409 },
       );

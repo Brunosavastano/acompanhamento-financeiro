@@ -14,13 +14,13 @@ type AccountForm = { personId: string; name: string; accountType: AccountType; i
 
 const roleLabels: Record<PersonRole, string> = {
   owner: "Titular",
-  spouse: "Conjuge",
+  spouse: "Cônjuge",
   dependent: "Dependente",
 };
 
 const accountTypeLabels: Record<AccountType, string> = {
   cash: "Caixa",
-  benefit: "Beneficio",
+  benefit: "Benefício",
   investment: "Investimento",
   cashback: "Cashback",
   other: "Outro",
@@ -46,7 +46,7 @@ export function SettingsManager({ household, initialPeople }: { household: House
 
   async function loadPeople() {
     const response = await fetch("/api/persons", { cache: "no-store" });
-    if (!response.ok) throw new Error("Nao foi possivel carregar pessoas e contas.");
+    if (!response.ok) throw new Error("Não foi possível carregar pessoas e contas.");
     const data = (await response.json()) as Person[];
     setPeople(data);
     setAccountForm((current) => ({
@@ -65,7 +65,7 @@ export function SettingsManager({ household, initialPeople }: { household: House
         headers: { "content-type": "application/json" },
         body: JSON.stringify(personForm),
       });
-      if (!response.ok) throw await apiError(response, "Nao foi possivel criar a pessoa.");
+      if (!response.ok) throw await apiError(response, "Não foi possível criar a pessoa.");
       setPersonForm({ name: "", role: "dependent" });
       await loadPeople();
       setFeedback({ kind: "success", text: "Pessoa criada." });
@@ -86,7 +86,7 @@ export function SettingsManager({ household, initialPeople }: { household: House
         headers: { "content-type": "application/json" },
         body: JSON.stringify(personEdit),
       });
-      if (!response.ok) throw await apiError(response, "Nao foi possivel salvar a pessoa.");
+      if (!response.ok) throw await apiError(response, "Não foi possível salvar a pessoa.");
       setEditingPersonId(null);
       setPersonEdit(null);
       await loadPeople();
@@ -103,7 +103,7 @@ export function SettingsManager({ household, initialPeople }: { household: House
     setFeedback(null);
     try {
       const response = await fetch(`/api/persons/${id}`, { method: "DELETE" });
-      if (!response.ok) throw await apiError(response, "Nao foi possivel remover a pessoa.");
+      if (!response.ok) throw await apiError(response, "Não foi possível remover a pessoa.");
       await loadPeople();
       setFeedback({ kind: "success", text: "Pessoa removida." });
     } catch (error) {
@@ -123,7 +123,7 @@ export function SettingsManager({ household, initialPeople }: { household: House
         headers: { "content-type": "application/json" },
         body: JSON.stringify(accountForm),
       });
-      if (!response.ok) throw await apiError(response, "Nao foi possivel criar a conta.");
+      if (!response.ok) throw await apiError(response, "Não foi possível criar a conta.");
       setAccountForm((current) => ({ ...current, name: "", accountType: "cash", isActive: true }));
       await loadPeople();
       setFeedback({ kind: "success", text: "Conta criada." });
@@ -144,7 +144,7 @@ export function SettingsManager({ household, initialPeople }: { household: House
         headers: { "content-type": "application/json" },
         body: JSON.stringify(accountEdit),
       });
-      if (!response.ok) throw await apiError(response, "Nao foi possivel salvar a conta.");
+      if (!response.ok) throw await apiError(response, "Não foi possível salvar a conta.");
       setEditingAccountId(null);
       setAccountEdit(null);
       await loadPeople();
@@ -161,7 +161,7 @@ export function SettingsManager({ household, initialPeople }: { household: House
     setFeedback(null);
     try {
       const response = await fetch(`/api/accounts/${id}`, { method: "DELETE" });
-      if (!response.ok) throw await apiError(response, "Nao foi possivel remover a conta.");
+      if (!response.ok) throw await apiError(response, "Não foi possível remover a conta.");
       await loadPeople();
       setFeedback({ kind: "success", text: "Conta removida." });
     } catch (error) {
@@ -178,7 +178,7 @@ export function SettingsManager({ household, initialPeople }: { household: House
           <h2 className="text-base font-semibold text-white">{household.name}</h2>
           <p className="mt-2 text-sm text-slate-400">Moeda base: {household.baseCurrency}</p>
           <p className="mt-4 text-sm leading-6 text-slate-400">
-            O MVP opera com uma familia unica e mantem household_id no schema para isolamento futuro.
+            O MVP opera com uma família única e mantém household_id no schema para isolamento futuro.
           </p>
           <div className="mt-4 flex flex-wrap gap-2 text-xs text-slate-400">
             <span className="rounded-md border border-line px-2 py-1">{people.length} pessoas</span>
@@ -250,7 +250,7 @@ export function SettingsManager({ household, initialPeople }: { household: House
                         <IconButton label="Salvar pessoa" disabled={busyKey === `person-${person.id}` || !personEdit.name} onClick={() => void savePerson(person.id)}>
                           <Save className="h-4 w-4" />
                         </IconButton>
-                        <IconButton label="Cancelar edicao" onClick={() => { setEditingPersonId(null); setPersonEdit(null); }}>
+                        <IconButton label="Cancelar edição" onClick={() => { setEditingPersonId(null); setPersonEdit(null); }}>
                           <X className="h-4 w-4" />
                         </IconButton>
                       </>
@@ -292,7 +292,7 @@ export function SettingsManager({ household, initialPeople }: { household: House
                         <IconButton label="Salvar conta no card" disabled={busyKey === `account-${account.id}` || !accountEdit.name || !accountEdit.personId} onClick={() => void saveAccount(account.id)}>
                           <Save className="h-4 w-4" />
                         </IconButton>
-                        <IconButton label="Cancelar edicao da conta no card" onClick={() => { setEditingAccountId(null); setAccountEdit(null); }}>
+                        <IconButton label="Cancelar edição da conta no card" onClick={() => { setEditingAccountId(null); setAccountEdit(null); }}>
                           <X className="h-4 w-4" />
                         </IconButton>
                       </div>
@@ -328,7 +328,7 @@ export function SettingsManager({ household, initialPeople }: { household: House
                   <th>Pessoa</th>
                   <th>Tipo</th>
                   <th>Status</th>
-                  <th className="text-right">Acoes</th>
+                  <th className="text-right">Ações</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-line">
@@ -360,7 +360,7 @@ export function SettingsManager({ household, initialPeople }: { household: House
                               <IconButton label="Salvar conta" disabled={busyKey === `account-${account.id}` || !accountEdit.name || !accountEdit.personId} onClick={() => void saveAccount(account.id)}>
                                 <Save className="h-4 w-4" />
                               </IconButton>
-                              <IconButton label="Cancelar edicao" onClick={() => { setEditingAccountId(null); setAccountEdit(null); }}>
+                              <IconButton label="Cancelar edição" onClick={() => { setEditingAccountId(null); setAccountEdit(null); }}>
                                 <X className="h-4 w-4" />
                               </IconButton>
                             </>

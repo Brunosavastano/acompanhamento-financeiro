@@ -22,7 +22,7 @@ export default async function ConfiguracoesPage() {
 
   return (
     <>
-      <PageHeader title="Configuracoes" description="Cadastro base da familia, pessoas e contas usadas nos fechamentos mensais." />
+      <PageHeader title="Configurações" description="Cadastro base da família, pessoas e contas usadas nos fechamentos mensais." />
       <SettingsManager
         household={{ name: household.name, baseCurrency: household.baseCurrency }}
         initialPeople={people}

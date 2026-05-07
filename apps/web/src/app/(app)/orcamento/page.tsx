@@ -13,7 +13,7 @@ export default async function OrcamentoPage({
   const people = await prisma.person.findMany({ where: { householdId }, orderBy: { name: "asc" } });
   return (
     <>
-      <PageHeader title="Orcamento" description="Entradas, despesas fixas, variaveis, sobra mensal e comprometimento de renda." />
+      <PageHeader title="Orçamento" description="Entradas, despesas fixas, variáveis, sobra mensal e comprometimento de renda." />
       <BudgetManager people={people.map((person) => ({ id: person.id, name: person.name }))} defaultPeriod={params.period_month} />
     </>
   );

@@ -20,7 +20,7 @@ export function LoginForm() {
     });
     setLoading(false);
     if (result?.error) {
-      setError(result.error === "CredentialsSignin" ? "Credenciais invalidas." : "Falha ao autenticar. Verifique se o banco local esta ativo.");
+      setError(result.error === "CredentialsSignin" ? "Credenciais inválidas." : "Falha ao autenticar. Verifique se o banco local está ativo.");
       return;
     }
     window.location.href = "/dashboard";
@@ -29,9 +29,9 @@ export function LoginForm() {
   return (
     <form onSubmit={submit} className="w-full max-w-sm rounded-lg border border-line bg-ink/70 p-6 shadow-glow">
       <h2 className="text-xl font-semibold text-white">Entrar</h2>
-      <p className="mt-2 text-sm text-slate-400">Acesse com seu email e senha cadastrados.</p>
+      <p className="mt-2 text-sm text-slate-400">Acesse com seu e-mail e senha cadastrados.</p>
       <label className="mt-6 block text-sm font-medium text-slate-300">
-        Email
+        E-mail
         <input
           value={email}
           onChange={(event) => setEmail(event.target.value)}

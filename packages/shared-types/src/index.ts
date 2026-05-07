@@ -23,7 +23,7 @@ export const updatePositionSchema = z.object({
 export const debtCashflowSchema = z
   .object({
     personId: z.string().min(1),
-    cardName: z.string().min(1).default("Cartao principal"),
+    cardName: z.string().min(1).default("Cartão principal"),
     invoiceMonth: periodMonthSchema,
     paymentMonth: periodMonthSchema,
     amount: moneySchema,
@@ -31,7 +31,7 @@ export const debtCashflowSchema = z
   })
   .refine((input) => input.paymentMonth >= input.invoiceMonth, {
     path: ["paymentMonth"],
-    message: "O vencimento nao pode ser anterior ao mes da fatura.",
+    message: "O vencimento não pode ser anterior ao mês da fatura.",
   });
 
 export const budgetItemSchema = z.object({

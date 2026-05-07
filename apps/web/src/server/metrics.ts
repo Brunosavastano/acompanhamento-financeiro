@@ -66,7 +66,7 @@ export async function getDashboardData(householdId: string, periodMonth?: string
       assetComposition: [
         { name: "Caixa", value: metrics.kpis.cashTotal },
         { name: "Investimentos", value: metrics.kpis.investmentsTotal },
-        { name: "Dividas PV", value: metrics.kpis.debtPvTotal },
+        { name: "Dívidas PV", value: metrics.kpis.debtPvTotal },
       ],
       monthlyVariation: history.map((row) => ({ month: row.month, value: row.monthlyVariation })),
       assetsVsDebt: history.map((row) => ({ month: row.month, assets: row.assetsTotal, debt: row.debtPvTotal })),

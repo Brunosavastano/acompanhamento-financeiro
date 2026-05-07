@@ -7,7 +7,7 @@ export async function assertPersonInHousehold(personId: string | null | undefine
     select: { id: true },
   });
   if (!person) {
-    throw new Response("Pessoa nao pertence a familia autenticada.", { status: 400 });
+    throw new Response("Pessoa não pertence à família autenticada.", { status: 400 });
   }
 }
 
@@ -18,6 +18,6 @@ export async function assertAccountInHousehold(accountId: string | null | undefi
     select: { id: true },
   });
   if (!account) {
-    throw new Response("Conta nao pertence a familia autenticada.", { status: 400 });
+    throw new Response("Conta não pertence à família autenticada.", { status: 400 });
   }
 }

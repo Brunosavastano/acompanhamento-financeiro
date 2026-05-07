@@ -9,7 +9,7 @@ export default async function BalancetesPage() {
 
   return (
     <>
-      <PageHeader title="Balancetes" description="Historico mensal normalizado a partir dos snapshots fechados e revisoes." />
+      <PageHeader title="Balancetes" description="Histórico mensal normalizado a partir dos snapshots fechados e revisões." />
       <BalanceSheetManager history={history} />
     </>
   );

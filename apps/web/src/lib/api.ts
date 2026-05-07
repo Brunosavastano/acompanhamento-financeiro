@@ -9,7 +9,7 @@ export function errorResponse(error: unknown): Response {
   if (error instanceof ZodError) {
     return Response.json(
       {
-        error: error.issues[0]?.message ?? "Payload invalido.",
+      error: error.issues[0]?.message ?? "Payload inválido.",
         issues: error.issues,
       },
       { status: 400 },

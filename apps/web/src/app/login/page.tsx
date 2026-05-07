@@ -20,7 +20,7 @@ export default async function LoginPage() {
             <div className="relative mx-auto w-full max-w-[300px] overflow-hidden rounded-lg border border-line bg-panel2/40 shadow-glow sm:max-w-[340px]">
               <Image
                 src="/savastano-crest.png"
-                alt="Brasao Savastano"
+                alt="Brasão Savastano"
                 width={700}
                 height={875}
                 priority
@@ -30,16 +30,16 @@ export default async function LoginPage() {
           </div>
           <div className="max-w-xl pb-8">
             <h1 className="text-3xl font-semibold leading-tight text-white sm:text-4xl">
-              Fechamento financeiro familiar, sem copiar celulas.
+              Fechamento financeiro familiar, sem copiar células.
             </h1>
             <p className="mt-5 text-base leading-7 text-slate-300">
-              Dashboard, dividas a valor presente, orcamento, metas e historico mensal em uma rotina unica de fechamento.
+              Dashboard, dívidas a valor presente, orçamento, metas e histórico mensal em uma rotina única de fechamento.
             </p>
           </div>
           <div className="grid gap-3 text-sm text-slate-400 sm:grid-cols-3">
             <span>PL consolidado</span>
-            <span>Selic manual</span>
-            <span>Backup exportavel</span>
+            <span>Selic Bacen</span>
+            <span>Backup exportável</span>
           </div>
         </section>
         <section className="flex items-center justify-center border-l border-line bg-panel px-6 py-12">

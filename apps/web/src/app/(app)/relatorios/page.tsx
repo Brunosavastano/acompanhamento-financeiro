@@ -23,7 +23,7 @@ export default async function RelatoriosPage() {
 
   return (
     <>
-      <PageHeader title="Relatorios" description="Importacao inicial da planilha, reconciliacao de KPIs e exportacao de backup." />
+      <PageHeader title="Relatórios" description="Importação inicial da planilha, reconciliação de KPIs e exportação de backup." />
       <ReportsManager
         defaultPath={process.env.DEFAULT_EXCEL_PATH ?? ""}
         initialAuditLogs={auditLogs.map((log) => ({

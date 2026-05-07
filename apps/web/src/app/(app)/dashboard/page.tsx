@@ -20,8 +20,8 @@ export default async function DashboardPage({
   if (!data.hasData || !data.kpis) {
     return (
       <>
-        <PageHeader title="Dashboard" description="Importe a planilha inicial para comecar o historico financeiro." />
-        <EmptyState title="Nenhum fechamento encontrado" description="Use Relatorios para importar a planilha e gerar os primeiros snapshots." />
+        <PageHeader title="Dashboard" description="Importe a planilha inicial para começar o histórico financeiro." />
+        <EmptyState title="Nenhum fechamento encontrado" description="Use Relatórios para importar a planilha e gerar os primeiros snapshots." />
       </>
     );
   }
@@ -32,12 +32,12 @@ export default async function DashboardPage({
     <>
       <PageHeader
         title="Dashboard"
-        description={`Referencia: ${displayMonth(data.periodMonth)}`}
+        description={`Referência: ${displayMonth(data.periodMonth)}`}
         actions={
           <div className="flex flex-wrap items-center gap-2">
             <form action="/dashboard" className="flex items-center gap-2">
               <label className="sr-only" htmlFor="period_month">
-                Mes de referencia
+                Mês de referência
               </label>
               <select
                 id="period_month"
@@ -64,30 +64,30 @@ export default async function DashboardPage({
         }
       />
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <KpiCard label="Patrimonio liquido" value={currency(kpis.netWorth)} detail={`${currency(kpis.monthlyVariation)} vs mes anterior`} tone={kpis.monthlyVariation >= 0 ? "green" : "magenta"} />
+        <KpiCard label="Patrimônio líquido" value={currency(kpis.netWorth)} detail={`${currency(kpis.monthlyVariation)} vs mês anterior`} tone={kpis.monthlyVariation >= 0 ? "green" : "magenta"} />
         <KpiCard label="Caixa" value={currency(kpis.cashTotal)} detail={`${number(kpis.reserveMonths, 2)} meses de reserva`} tone="cyan" />
         <KpiCard label="Investimentos" value={currency(kpis.investmentsTotal)} detail={`${percent(kpis.investmentsToAssets, 1)} dos ativos`} tone="green" />
-        <KpiCard label="Dividas PV" value={currency(kpis.debtPvTotal)} detail={`${percent(kpis.debtToAssets, 1)} dos ativos`} tone="magenta" />
+        <KpiCard label="Dívidas PV" value={currency(kpis.debtPvTotal)} detail={`${percent(kpis.debtToAssets, 1)} dos ativos`} tone="magenta" />
       </div>
       <div className="mt-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <KpiCard label="Poupanca patrimonial" value={percent(kpis.patrimonialSavingsRate, 1)} detail="Variacao do PL sobre receita orcada" tone={kpis.patrimonialSavingsRate >= 0 ? "green" : "magenta"} />
-        <KpiCard label="Poupanca orcamentaria" value={percent(kpis.budgetSavingsRate, 1)} detail="Sobra recorrente sobre receita" tone={kpis.budgetSavingsRate >= 0 ? "green" : "magenta"} />
-        <KpiCard label="Fatura do mes" value={currency(data.debt.monthlyInvoiceTotal)} detail={`Float: ${currency(data.debt.floatGain)}`} tone="amber" />
+        <KpiCard label="Poupança patrimonial" value={percent(kpis.patrimonialSavingsRate, 1)} detail="Variação do PL sobre receita orçada" tone={kpis.patrimonialSavingsRate >= 0 ? "green" : "magenta"} />
+        <KpiCard label="Poupança orçamentária" value={percent(kpis.budgetSavingsRate, 1)} detail="Sobra recorrente sobre receita" tone={kpis.budgetSavingsRate >= 0 ? "green" : "magenta"} />
+        <KpiCard label="Fatura do mês" value={currency(data.debt.monthlyInvoiceTotal)} detail={`Float: ${currency(data.debt.floatGain)}`} tone="amber" />
         <KpiCard label="Sobra mensal estimada" value={currency(data.budget.monthlySurplus)} detail={`${percent(data.budget.incomeCommitment, 1)} da renda comprometida`} tone={data.budget.monthlySurplus >= 0 ? "green" : "magenta"} />
       </div>
 
       <div className="mt-6 grid gap-4 xl:grid-cols-[1.4fr_0.8fr]">
         <Panel>
           <div className="mb-4">
-            <h2 className="text-base font-semibold text-white">Evolucao do patrimonio liquido</h2>
-            <p className="text-sm text-slate-400">Historico mensal recalculado pelo app.</p>
+            <h2 className="text-base font-semibold text-white">Evolução do patrimônio líquido</h2>
+            <p className="text-sm text-slate-400">Histórico mensal recalculado pelo app.</p>
           </div>
           <NetWorthChart data={data.charts.netWorthEvolution} />
         </Panel>
         <Panel>
           <div className="mb-4">
-            <h2 className="text-base font-semibold text-white">Composicao patrimonial</h2>
-            <p className="text-sm text-slate-400">Caixa, investimentos e dividas PV.</p>
+            <h2 className="text-base font-semibold text-white">Composição patrimonial</h2>
+            <p className="text-sm text-slate-400">Caixa, investimentos e dívidas PV.</p>
           </div>
           <CompositionChart data={data.charts.assetComposition} />
         </Panel>
@@ -95,11 +95,11 @@ export default async function DashboardPage({
 
       <div className="mt-4 grid gap-4 xl:grid-cols-3">
         <Panel>
-          <h2 className="mb-4 text-base font-semibold text-white">Variacao mensal</h2>
+          <h2 className="mb-4 text-base font-semibold text-white">Variação mensal</h2>
           <VariationChart data={data.charts.monthlyVariation} />
         </Panel>
         <Panel>
-          <h2 className="mb-4 text-base font-semibold text-white">Divida / ativos</h2>
+          <h2 className="mb-4 text-base font-semibold text-white">Dívida / ativos</h2>
           <RatioChart data={data.charts.debtToAssets} />
         </Panel>
         <Panel>
@@ -111,8 +111,8 @@ export default async function DashboardPage({
       <Panel className="mt-4">
         <div className="mb-4 flex items-center justify-between">
           <div>
-            <h2 className="text-base font-semibold text-white">Metas mais proximas</h2>
-            <p className="text-sm text-slate-400">Ordenadas por progresso no mes de referencia.</p>
+            <h2 className="text-base font-semibold text-white">Metas mais próximas</h2>
+            <p className="text-sm text-slate-400">Ordenadas por progresso no mês de referência.</p>
           </div>
           <Link href="/metas" className="text-sm font-medium text-cyan hover:text-white">
             Ver metas
@@ -127,7 +127,7 @@ export default async function DashboardPage({
               </div>
               <div className="mt-2 text-xs text-slate-400">{percent(goal.progressPct, 1)} atingido</div>
               {goal.requiredCagr !== null ? (
-                <div className="mt-2 text-xs font-medium text-amber">{percent(goal.requiredCagr, 1)} a.a. necessario</div>
+                <div className="mt-2 text-xs font-medium text-amber">{percent(goal.requiredCagr, 1)} a.a. necessário</div>
               ) : null}
             </div>
           ))}

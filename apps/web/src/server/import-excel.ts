@@ -148,11 +148,11 @@ export async function runExcelImport(input: { householdId: string; filePath: str
             data: debtCashflows.map((flow) => ({
               householdId: input.householdId,
               personId: flow.personId,
-              cardName: "Cartao principal",
+              cardName: "Cartão principal",
               invoiceMonth: flow.invoiceMonth,
               paymentMonth: flow.paymentMonth,
               amount: flow.amount,
-              description: "Parcela importada da matriz de dividas",
+              description: "Parcela importada da matriz de dívidas",
               source: "import" as const,
             })),
           });
@@ -247,7 +247,7 @@ async function readWorkbookBuffer(filePath: string) {
 
 function getRows(workbook: XLSXModule.WorkBook, sheetNames: string[]): SheetRow[] {
   const sheetName = sheetNames.find((candidate) => workbook.Sheets[candidate]);
-  if (!sheetName) throw new Error(`Aba '${sheetNames[0]}' nao encontrada.`);
+  if (!sheetName) throw new Error(`Aba '${sheetNames[0]}' não encontrada.`);
   const sheet = workbook.Sheets[sheetName];
   return XLSX.utils.sheet_to_json(sheet, { header: 1, raw: true, defval: null }) as SheetRow[];
 }

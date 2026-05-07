@@ -19,7 +19,7 @@ export default async function FechamentoPage() {
     <>
       <PageHeader
         title="Fechamento mensal"
-        description="Crie um rascunho, informe saldos por conta, revise a previa dos indicadores e feche o mes com Selic obtida do Bacen."
+        description="Crie um rascunho, informe saldos por conta, revise a prévia dos indicadores e feche o mês com Selic obtida do Bacen."
       />
       <MonthlyCloseWizard
         defaultPeriod={defaultDate.toISOString().slice(0, 10)}

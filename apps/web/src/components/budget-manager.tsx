@@ -48,7 +48,7 @@ type BudgetMetrics = {
 const kindLabels: Record<BudgetKind, string> = {
   income: "Entrada",
   fixed_expense: "Despesa fixa",
-  variable_expense: "Despesa variavel",
+  variable_expense: "Despesa variável",
 };
 
 const recurrenceLabels: Record<BudgetRecurrence, string> = {
@@ -96,13 +96,13 @@ export function BudgetManager({ people, defaultPeriod }: { people: Person[]; def
     try {
       const response = await fetch(`/api/budget?period_month=${period}`);
       if (!response.ok) {
-        throw new Error("Nao foi possivel carregar o orcamento.");
+        throw new Error("Não foi possível carregar o orçamento.");
       }
       const data = await response.json();
       setItems(data.items);
       setMetrics(data.metrics);
     } catch (error) {
-      setFeedback({ kind: "error", text: error instanceof Error ? error.message : "Falha ao carregar orcamento." });
+      setFeedback({ kind: "error", text: error instanceof Error ? error.message : "Falha ao carregar orçamento." });
     }
   }
 
@@ -126,7 +126,7 @@ export function BudgetManager({ people, defaultPeriod }: { people: Person[]; def
         }),
       });
       if (!response.ok) {
-        throw new Error("Nao foi possivel adicionar o item.");
+        throw new Error("Não foi possível adicionar o item.");
       }
       setForm({ ...form, name: "", amountMonthly: "", endMonth: "" });
       setFeedback({ kind: "success", text: "Item adicionado." });
@@ -169,7 +169,7 @@ export function BudgetManager({ people, defaultPeriod }: { people: Person[]; def
         }),
       });
       if (!response.ok) {
-        throw new Error("Nao foi possivel salvar o item.");
+        throw new Error("Não foi possível salvar o item.");
       }
       setEditingId(null);
       setEditForm(null);
@@ -188,7 +188,7 @@ export function BudgetManager({ people, defaultPeriod }: { people: Person[]; def
     try {
       const response = await fetch(`/api/budget-items/${id}`, { method: "DELETE" });
       if (!response.ok) {
-        throw new Error("Nao foi possivel remover o item.");
+        throw new Error("Não foi possível remover o item.");
       }
       setFeedback({ kind: "success", text: "Item removido." });
       await load();
@@ -211,7 +211,7 @@ export function BudgetManager({ people, defaultPeriod }: { people: Person[]; def
           <Input type="number" step="0.01" placeholder="Valor mensal" value={form.amountMonthly} onChange={(event) => setForm({ ...form, amountMonthly: event.target.value })} className="w-full" />
           <div className="grid gap-3 sm:grid-cols-2">
             <label className="text-sm text-slate-300">
-              Inicio
+              Início
               <Input type="month" value={form.startMonth.slice(0, 7)} onChange={(event) => setForm({ ...form, startMonth: `${event.target.value}-01` })} className="mt-2 w-full" />
             </label>
             <label className="text-sm text-slate-300">
@@ -227,7 +227,7 @@ export function BudgetManager({ people, defaultPeriod }: { people: Person[]; def
           </div>
           <label className="inline-flex items-center gap-2 text-sm text-slate-300">
             <input type="checkbox" checked={form.isActive} onChange={(event) => setForm({ ...form, isActive: event.target.checked })} />
-            Ativo no orcamento
+            Ativo no orçamento
           </label>
           <Button type="submit" disabled={isSubmitting || !form.name || !form.amountMonthly}>
             <Plus className="h-4 w-4" />
@@ -239,36 +239,36 @@ export function BudgetManager({ people, defaultPeriod }: { people: Person[]; def
       <Panel>
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h2 className="text-base font-semibold text-white">Orcamento de {period}</h2>
+            <h2 className="text-base font-semibold text-white">Orçamento de {period}</h2>
             <p className="text-sm text-slate-400">
               Receita {currency(metrics.incomeTotal)} - Despesa projetada {currency(metrics.expenseTotal)} - Sobra {currency(metrics.monthlySurplus)}
             </p>
           </div>
           <div className="flex items-center gap-2">
             <Input type="month" value={period} onChange={(event) => setPeriod(event.target.value)} />
-            <button type="button" onClick={() => void load()} className="focus-ring rounded-md border border-line p-2 text-slate-300" aria-label="Atualizar orcamento">
+            <button type="button" onClick={() => void load()} className="focus-ring rounded-md border border-line p-2 text-slate-300" aria-label="Atualizar orçamento">
               <RefreshCw className="h-4 w-4" />
             </button>
           </div>
         </div>
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <Metric label="Comprometimento" value={percent(metrics.incomeCommitment, 1)} />
-          <Metric label="Poupanca orcamentaria" value={percent(metrics.budgetSavingsRate, 1)} />
+          <Metric label="Poupança orçamentária" value={percent(metrics.budgetSavingsRate, 1)} />
           <Metric
-            label="Cartao media"
+            label="Cartão média"
             value={currency(metrics.cardMovingAverageExpense)}
             detail={
               metrics.cardMovingAverageApplied || metrics.cardMovingAverageExpense === 0
-                ? `${metrics.cardMovingAverageMonths} mes(es)`
-                : `${metrics.cardMovingAverageMonths} mes(es), ja coberto`
+                ? `${metrics.cardMovingAverageMonths} mês(es)`
+                : `${metrics.cardMovingAverageMonths} mês(es), já coberto`
             }
           />
           <Metric label="Sobra mensal" value={currency(metrics.monthlySurplus)} />
         </div>
         <div className="mt-3 grid gap-3 sm:grid-cols-3">
           <Metric label="Despesa fixa" value={currency(metrics.fixedExpenseTotal)} />
-          <Metric label="Variavel manual" value={currency(metrics.budgetItemVariableExpenseTotal)} />
-          <Metric label="Variavel projetada" value={currency(metrics.variableExpenseTotal)} />
+          <Metric label="Variável manual" value={currency(metrics.budgetItemVariableExpenseTotal)} />
+          <Metric label="Variável projetada" value={currency(metrics.variableExpenseTotal)} />
         </div>
         <div className="mt-4 space-y-3 md:hidden">
           {items.map((item) => {
@@ -302,7 +302,7 @@ export function BudgetManager({ people, defaultPeriod }: { people: Person[]; def
                       <IconButton label="Salvar item no card" disabled={savingId === item.id || !editForm.name || !editForm.amountMonthly} onClick={() => void saveItem(item.id)}>
                         <Save className="h-4 w-4" />
                       </IconButton>
-                      <IconButton label="Cancelar edicao do item no card" onClick={() => { setEditingId(null); setEditForm(null); }}>
+                      <IconButton label="Cancelar edição do item no card" onClick={() => { setEditingId(null); setEditForm(null); }}>
                         <X className="h-4 w-4" />
                       </IconButton>
                     </div>
@@ -341,12 +341,12 @@ export function BudgetManager({ people, defaultPeriod }: { people: Person[]; def
                 <th className="py-2">Item</th>
                 <th>Tipo</th>
                 <th>Pessoa</th>
-                <th>Recorrencia</th>
-                <th>Inicio</th>
+                <th>Recorrência</th>
+                <th>Início</th>
                 <th>Fim</th>
                 <th>Valor</th>
                 <th>Status</th>
-                <th className="text-right">Acoes</th>
+                <th className="text-right">Ações</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-line">
@@ -397,7 +397,7 @@ export function BudgetManager({ people, defaultPeriod }: { people: Person[]; def
                           <IconButton label="Salvar item" disabled={savingId === item.id || !editForm.name || !editForm.amountMonthly} onClick={() => void saveItem(item.id)}>
                             <Save className="h-4 w-4" />
                           </IconButton>
-                          <IconButton label="Cancelar edicao" onClick={() => { setEditingId(null); setEditForm(null); }}>
+                          <IconButton label="Cancelar edição" onClick={() => { setEditingId(null); setEditForm(null); }}>
                             <X className="h-4 w-4" />
                           </IconButton>
                         </div>
@@ -418,7 +418,7 @@ export function BudgetManager({ people, defaultPeriod }: { people: Person[]; def
             </tbody>
           </table>
         </div>
-        {items.length === 0 ? <p className="py-6 text-center text-sm text-slate-500">Nenhum item ativo neste mes.</p> : null}
+        {items.length === 0 ? <p className="py-6 text-center text-sm text-slate-500">Nenhum item ativo neste mês.</p> : null}
       </Panel>
     </div>
   );
@@ -429,7 +429,7 @@ function KindSelect({ className, value, onChange }: { className?: string; value:
     <Select value={value} onChange={(event) => onChange(event.target.value as BudgetKind)} className={className ?? "w-full"}>
       <option value="income">Entrada</option>
       <option value="fixed_expense">Despesa fixa</option>
-      <option value="variable_expense">Despesa variavel</option>
+      <option value="variable_expense">Despesa variável</option>
     </Select>
   );
 }

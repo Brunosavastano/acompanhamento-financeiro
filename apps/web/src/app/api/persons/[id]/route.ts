@@ -61,7 +61,7 @@ export async function DELETE(_request: Request, { params }: { params: Promise<{ 
       prisma.position.count({ where: { accountId: { in: current.accounts.map((account) => account.id) } } }),
     ]);
     if (positions + debtCashflows + budgetItems + accountPositions > 0) {
-      return json({ error: "Pessoa possui movimentos vinculados e nao pode ser removida." }, { status: 409 });
+      return json({ error: "Pessoa possui movimentos vinculados e não pode ser removida." }, { status: 409 });
     }
     await prisma.person.delete({ where: { id } });
     await audit({ userId, entityType: "person", entityId: id, action: "delete", oldValue: current });

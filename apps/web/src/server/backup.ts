@@ -3,18 +3,18 @@ import { getHouseholdAuditLogs } from "@/server/audit-scope";
 import { visibleGoalWhere } from "@/server/goal-scope";
 
 export const csvDatasets = [
-  { key: "household", label: "Familia" },
+  { key: "household", label: "Família" },
   { key: "persons", label: "Pessoas" },
   { key: "accounts", label: "Contas" },
   { key: "snapshots", label: "Snapshots" },
-  { key: "positions", label: "Posicoes" },
-  { key: "debtCashflows", label: "Dividas" },
-  { key: "budgetItems", label: "Orcamento" },
+  { key: "positions", label: "Posições" },
+  { key: "debtCashflows", label: "Dívidas" },
+  { key: "budgetItems", label: "Orçamento" },
   { key: "goals", label: "Metas" },
   { key: "goalProgressSnapshots", label: "Progresso das metas" },
   { key: "interestRates", label: "Taxas" },
-  { key: "importJobs", label: "Importacoes" },
-  { key: "importReconciliationRows", label: "Reconciliacao" },
+  { key: "importJobs", label: "Importações" },
+  { key: "importReconciliationRows", label: "Reconciliação" },
   { key: "auditLogs", label: "Auditoria" },
 ] as const;
 

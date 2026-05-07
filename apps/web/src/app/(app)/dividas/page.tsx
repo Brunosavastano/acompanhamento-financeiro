@@ -18,7 +18,7 @@ export default async function DividasPage({
 
   return (
     <>
-      <PageHeader title="Dividas" description="Informe os vencimentos futuros do cartao e acompanhe a divida total trazida a valor presente." />
+      <PageHeader title="Dívidas" description="Informe os vencimentos futuros do cartão e acompanhe a dívida total trazida a valor presente." />
       <DebtManager
         people={people.map((person) => ({ id: person.id, name: person.name }))}
         defaultPeriod={defaultPeriod}

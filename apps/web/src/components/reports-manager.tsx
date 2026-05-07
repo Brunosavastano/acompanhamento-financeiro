@@ -36,18 +36,18 @@ type AuditLog = {
 type RowFilter = "all" | "failed" | "passed";
 
 const csvBackups = [
-  { key: "household", label: "Familia" },
+  { key: "household", label: "Família" },
   { key: "persons", label: "Pessoas" },
   { key: "accounts", label: "Contas" },
   { key: "snapshots", label: "Snapshots" },
-  { key: "positions", label: "Posicoes" },
-  { key: "debtCashflows", label: "Dividas" },
-  { key: "budgetItems", label: "Orcamento" },
+  { key: "positions", label: "Posições" },
+  { key: "debtCashflows", label: "Dívidas" },
+  { key: "budgetItems", label: "Orçamento" },
   { key: "goals", label: "Metas" },
   { key: "goalProgressSnapshots", label: "Progresso metas" },
   { key: "interestRates", label: "Taxas" },
-  { key: "importJobs", label: "Importacoes" },
-  { key: "importReconciliationRows", label: "Reconciliacao" },
+  { key: "importJobs", label: "Importações" },
+  { key: "importReconciliationRows", label: "Reconciliação" },
   { key: "auditLogs", label: "Auditoria" },
 ] as const;
 
@@ -114,7 +114,7 @@ export function ReportsManager({
       const response = await fetch("/api/import/excel", init);
       const payload = await response.json();
       if (!response.ok || payload.error) {
-        setMessage(payload.error ?? "Nao foi possivel importar a planilha.");
+        setMessage(payload.error ?? "Não foi possível importar a planilha.");
         return;
       }
       const job = {
@@ -127,7 +127,7 @@ export function ReportsManager({
       };
       setJobs((current) => [job, ...current.filter((item) => item.id !== job.id)]);
       if (payload.id) await loadReconciliation(payload.id);
-      setMessage(`Importacao concluida: ${job.rows} reconciliacoes geradas.`);
+      setMessage(`Importação concluída: ${job.rows} reconciliações geradas.`);
     } finally {
       setLoading(false);
     }
@@ -152,7 +152,7 @@ export function ReportsManager({
       <div className="grid gap-4 xl:grid-cols-[0.8fr_1.2fr]">
         <Panel>
         <h2 className="text-base font-semibold text-white">Importar planilha</h2>
-        <p className="mt-2 text-sm text-slate-400">A importacao substitui a linha de base importada e recalcula os indicadores no app.</p>
+        <p className="mt-2 text-sm text-slate-400">A importação substitui a linha de base importada e recalcula os indicadores no app.</p>
         <div className="mt-4 space-y-3">
           <label className="block text-sm text-slate-300">
             Caminho local
@@ -230,9 +230,9 @@ export function ReportsManager({
         <Panel>
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <h2 className="text-base font-semibold text-white">Reconciliacao</h2>
+            <h2 className="text-base font-semibold text-white">Reconciliação</h2>
             <p className="mt-1 text-sm text-slate-400">
-              {selectedJob ? `${selectedJob.fileName} - ${new Date(selectedJob.createdAt).toLocaleString("pt-BR")}` : "Comparacao entre KPIs da planilha e metricas recalculadas pelo app."}
+              {selectedJob ? `${selectedJob.fileName} - ${new Date(selectedJob.createdAt).toLocaleString("pt-BR")}` : "Comparação entre KPIs da planilha e métricas recalculadas pelo app."}
             </p>
           </div>
           {rows.length ? (
@@ -273,8 +273,8 @@ export function ReportsManager({
           <table className="min-w-full text-sm">
             <thead className="text-left text-xs uppercase tracking-[0.12em] text-slate-500">
               <tr>
-                <th className="py-2">Mes</th>
-                <th>Metrica</th>
+                <th className="py-2">Mês</th>
+                <th>Métrica</th>
                 <th>Planilha</th>
                 <th>App</th>
                 <th>Delta</th>
@@ -294,7 +294,7 @@ export function ReportsManager({
               ))}
             </tbody>
           </table>
-          {rows.length === 0 ? <p className="py-6 text-center text-sm text-slate-500">Nenhuma reconciliacao carregada.</p> : null}
+          {rows.length === 0 ? <p className="py-6 text-center text-sm text-slate-500">Nenhuma reconciliação carregada.</p> : null}
           {rows.length > 0 && visibleRows.length === 0 ? <p className="py-6 text-center text-sm text-slate-500">Nenhuma linha neste filtro.</p> : null}
         </div>
         </Panel>
@@ -306,7 +306,7 @@ export function ReportsManager({
               <History className="h-4 w-4 text-cyan" />
               Auditoria recente
             </h2>
-            <p className="mt-1 text-sm text-slate-400">Alteracoes criticas registradas para backup, rastreabilidade e revisao.</p>
+            <p className="mt-1 text-sm text-slate-400">Alterações críticas registradas para backup, rastreabilidade e revisão.</p>
           </div>
           <button type="button" onClick={() => void loadAuditLogs()} className="focus-ring rounded-md border border-line p-2 text-slate-300" aria-label="Atualizar auditoria">
             <RefreshCw className="h-4 w-4" />
@@ -317,9 +317,9 @@ export function ReportsManager({
             <thead className="text-left text-xs uppercase tracking-[0.12em] text-slate-500">
               <tr>
                 <th className="py-2">Data</th>
-                <th>Acao</th>
+                <th>Ação</th>
                 <th>Entidade</th>
-                <th>Usuario</th>
+                <th>Usuário</th>
                 <th>Motivo</th>
               </tr>
             </thead>

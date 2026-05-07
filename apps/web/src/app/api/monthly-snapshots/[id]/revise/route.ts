@@ -14,7 +14,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       include: { positions: true },
     });
     if (current.status !== "closed") {
-      return json({ error: "Somente snapshots fechados podem gerar revisao." }, { status: 409 });
+      return json({ error: "Somente snapshots fechados podem gerar revisão." }, { status: 409 });
     }
     const latest = await prisma.monthlySnapshot.findFirst({
       where: { householdId, periodMonth: current.periodMonth },

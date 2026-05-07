@@ -49,12 +49,12 @@ export function DebtManager({ people, defaultPeriod }: { people: Person[]; defau
         fetch(`/api/debts/summary?period_month=${period}`),
       ]);
       if (!flowResponse.ok || !summaryResponse.ok) {
-        throw new Error("Nao foi possivel carregar os fluxos de divida.");
+        throw new Error("Não foi possível carregar os fluxos de dívida.");
       }
       setFlows(await flowResponse.json());
       setSummary(await summaryResponse.json());
     } catch (error) {
-      setFeedback({ kind: "error", text: error instanceof Error ? error.message : "Falha ao carregar dividas." });
+      setFeedback({ kind: "error", text: error instanceof Error ? error.message : "Falha ao carregar dívidas." });
     }
   }
 
@@ -76,10 +76,10 @@ export function DebtManager({ people, defaultPeriod }: { people: Person[]; defau
       const response = await fetch("/api/debts", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ ...form, amount: Number(form.amount), cardName: "Cartao principal" }),
+        body: JSON.stringify({ ...form, amount: Number(form.amount), cardName: "Cartão principal" }),
       });
       if (!response.ok) {
-        throw new Error(await apiErrorMessage(response, "Nao foi possivel adicionar a parcela."));
+        throw new Error(await apiErrorMessage(response, "Não foi possível adicionar a parcela."));
       }
       setForm((current) => ({ ...current, amount: "", description: "" }));
       setFeedback({ kind: "success", text: "Parcela adicionada." });
@@ -113,13 +113,13 @@ export function DebtManager({ people, defaultPeriod }: { people: Person[]; defau
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           ...editForm,
-          cardName: "Cartao principal",
+          cardName: "Cartão principal",
           amount: Number(editForm.amount),
           description: editForm.description || null,
         }),
       });
       if (!response.ok) {
-        throw new Error(await apiErrorMessage(response, "Nao foi possivel salvar a parcela."));
+        throw new Error(await apiErrorMessage(response, "Não foi possível salvar a parcela."));
       }
       setEditingId(null);
       setEditForm(null);
@@ -138,7 +138,7 @@ export function DebtManager({ people, defaultPeriod }: { people: Person[]; defau
     try {
       const response = await fetch(`/api/debt-cashflows/${id}`, { method: "DELETE" });
       if (!response.ok) {
-        throw new Error(await apiErrorMessage(response, "Nao foi possivel remover a parcela."));
+        throw new Error(await apiErrorMessage(response, "Não foi possível remover a parcela."));
       }
       setFeedback({ kind: "success", text: "Parcela removida." });
       await load();
@@ -157,14 +157,14 @@ export function DebtManager({ people, defaultPeriod }: { people: Person[]; defau
           <Field label="Pessoa">
             <PersonSelect people={people} value={form.personId} onChange={(personId) => setForm({ ...form, personId })} />
           </Field>
-          <Field label="Mes de vencimento" description="Valor total da fatura/cartao naquele mes.">
+          <Field label="Mês de vencimento" description="Valor total da fatura/cartão naquele mês.">
             <Input type="month" value={form.paymentMonth.slice(0, 7)} onChange={(event) => setForm({ ...form, paymentMonth: `${event.target.value}-01` })} className="w-full" />
           </Field>
           <Field label="Valor">
             <Input placeholder="Valor" type="number" step="0.01" value={form.amount} onChange={(event) => setForm({ ...form, amount: event.target.value })} className="w-full" />
           </Field>
-          <Field label="Descricao">
-            <Input placeholder="Descricao" value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} className="w-full" />
+          <Field label="Descrição">
+            <Input placeholder="Descrição" value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} className="w-full" />
           </Field>
           <Button type="submit" disabled={isSubmitting || !form.personId || !form.amount}>
             <Plus className="h-4 w-4" />
@@ -176,17 +176,17 @@ export function DebtManager({ people, defaultPeriod }: { people: Person[]; defau
       <Panel>
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h2 className="text-base font-semibold text-white">Divida base {period}</h2>
+            <h2 className="text-base font-semibold text-white">Dívida base {period}</h2>
             <p className="text-sm text-slate-400">
               Nominal {currency(summary.nominalTotal)} - Valor presente {currency(summary.presentValueTotal)} - Float {currency(summary.floatGain)}
             </p>
           </div>
           <div className="flex items-center gap-2">
             <label className="grid gap-1 text-xs font-medium text-slate-400">
-              Mes-base do calculo
+              Mês-base do cálculo
               <Input type="month" value={period} onChange={(event) => setPeriod(event.target.value)} />
             </label>
-            <button type="button" onClick={() => void load()} className="focus-ring rounded-md border border-line p-2 text-slate-300" aria-label="Atualizar dividas">
+            <button type="button" onClick={() => void load()} className="focus-ring rounded-md border border-line p-2 text-slate-300" aria-label="Atualizar dívidas">
               <RefreshCw className="h-4 w-4" />
             </button>
           </div>
@@ -201,20 +201,20 @@ export function DebtManager({ people, defaultPeriod }: { people: Person[]; defau
                     <Field label="Pessoa">
                       <PersonSelect people={people} value={editForm.personId} onChange={(personId) => setEditForm({ ...editForm, personId })} />
                     </Field>
-                    <Field label="Mes de vencimento">
+                    <Field label="Mês de vencimento">
                       <Input type="month" value={editForm.paymentMonth.slice(0, 7)} onChange={(event) => setEditForm({ ...editForm, paymentMonth: `${event.target.value}-01` })} className="w-full" />
                     </Field>
                     <Field label="Valor">
                       <Input type="number" step="0.01" value={editForm.amount} onChange={(event) => setEditForm({ ...editForm, amount: event.target.value })} className="w-full" />
                     </Field>
-                    <Field label="Descricao">
+                    <Field label="Descrição">
                       <Input value={editForm.description} onChange={(event) => setEditForm({ ...editForm, description: event.target.value })} className="w-full" />
                     </Field>
                     <div className="flex justify-end gap-2">
                       <IconButton label="Salvar fluxo no card" disabled={savingId === flow.id || !editForm.amount} onClick={() => void saveFlow(flow.id)}>
                         <Save className="h-4 w-4" />
                       </IconButton>
-                      <IconButton label="Cancelar edicao do fluxo no card" onClick={() => { setEditingId(null); setEditForm(null); }}>
+                      <IconButton label="Cancelar edição do fluxo no card" onClick={() => { setEditingId(null); setEditForm(null); }}>
                         <X className="h-4 w-4" />
                       </IconButton>
                     </div>
@@ -248,10 +248,10 @@ export function DebtManager({ people, defaultPeriod }: { people: Person[]; defau
             <thead className="text-left text-xs uppercase tracking-[0.12em] text-slate-500">
               <tr>
                 <th className="py-2">Pessoa</th>
-                <th>Mes de vencimento</th>
+                <th>Mês de vencimento</th>
                 <th>Valor</th>
-                <th>Descricao</th>
-                <th className="text-right">Acoes</th>
+                <th>Descrição</th>
+                <th className="text-right">Ações</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-line">
@@ -281,7 +281,7 @@ export function DebtManager({ people, defaultPeriod }: { people: Person[]; defau
                           <IconButton label="Salvar parcela" disabled={savingId === flow.id || !editForm.amount} onClick={() => void saveFlow(flow.id)}>
                             <Save className="h-4 w-4" />
                           </IconButton>
-                          <IconButton label="Cancelar edicao" onClick={() => { setEditingId(null); setEditForm(null); }}>
+                          <IconButton label="Cancelar edição" onClick={() => { setEditingId(null); setEditForm(null); }}>
                             <X className="h-4 w-4" />
                           </IconButton>
                         </div>
@@ -302,7 +302,7 @@ export function DebtManager({ people, defaultPeriod }: { people: Person[]; defau
             </tbody>
           </table>
         </div>
-        {flows.length === 0 ? <p className="py-6 text-center text-sm text-slate-500">Nenhuma divida futura para este mes-base.</p> : null}
+        {flows.length === 0 ? <p className="py-6 text-center text-sm text-slate-500">Nenhuma dívida futura para este mês-base.</p> : null}
       </Panel>
     </div>
   );

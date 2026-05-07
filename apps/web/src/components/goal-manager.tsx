@@ -78,7 +78,7 @@ export function GoalManager({
     try {
       const response = await fetch(`/api/goals?period_month=${nextPeriodMonth}`);
       if (!response.ok) {
-        setMessage("Nao foi possivel carregar as metas.");
+        setMessage("Não foi possível carregar as metas.");
         return;
       }
       const payload = await response.json();
@@ -100,7 +100,7 @@ export function GoalManager({
     });
 
     if (!response.ok) {
-      setMessage("Nao foi possivel criar a meta.");
+      setMessage("Não foi possível criar a meta.");
       return;
     }
 
@@ -151,7 +151,7 @@ export function GoalManager({
         body: JSON.stringify(serializeGoalForm(editForm, editForm.manualCurrentValue)),
       });
       if (!response.ok) {
-        setMessage("Nao foi possivel atualizar a meta.");
+        setMessage("Não foi possível atualizar a meta.");
         return;
       }
       cancelEdit();
@@ -169,7 +169,7 @@ export function GoalManager({
     try {
       const response = await fetch(`/api/goals/${goalId}`, { method: "DELETE" });
       if (!response.ok) {
-        setMessage("Nao foi possivel remover a meta.");
+        setMessage("Não foi possível remover a meta.");
         return;
       }
       if (editingId === goalId) cancelEdit();
@@ -195,7 +195,7 @@ export function GoalManager({
       }),
     });
     if (!response.ok) {
-      setMessage("Nao foi possivel atualizar o progresso.");
+      setMessage("Não foi possível atualizar o progresso.");
       return;
     }
     setGoals((current) =>
@@ -227,11 +227,11 @@ export function GoalManager({
           <h2 className="text-base font-semibold text-white">Nova meta</h2>
         </div>
         <form onSubmit={createGoal} className="mt-4 space-y-3">
-          <Input placeholder="Titulo" value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} className="w-full" required />
+          <Input placeholder="Título" value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} className="w-full" required />
           <div className="grid gap-3 sm:grid-cols-2">
             <Select value={form.horizon} onChange={(event) => setForm({ ...form, horizon: event.target.value as GoalForm["horizon"] })} className="w-full">
               <option value="short">Curto prazo</option>
-              <option value="medium">Medio prazo</option>
+              <option value="medium">Médio prazo</option>
               <option value="long">Longo prazo</option>
             </Select>
             <Select
@@ -245,7 +245,7 @@ export function GoalManager({
               <option value="manual">Manual</option>
             </Select>
           </div>
-          <Input placeholder="Chave da metrica, ex: pl_total" value={form.metricKey} onChange={(event) => setForm({ ...form, metricKey: event.target.value })} className="w-full" required />
+          <Input placeholder="Chave da métrica, ex: pl_total" value={form.metricKey} onChange={(event) => setForm({ ...form, metricKey: event.target.value })} className="w-full" required />
           <div className="grid gap-3 sm:grid-cols-2">
             <Input placeholder="Alvo" value={form.targetValue} onChange={(event) => setForm({ ...form, targetValue: event.target.value })} className="w-full" />
             <Input placeholder="Prazo" value={form.targetDate} onChange={(event) => setForm({ ...form, targetDate: event.target.value })} className="w-full" />
@@ -261,7 +261,7 @@ export function GoalManager({
         </form>
         <div className="mt-6 rounded-md border border-line bg-ink p-3">
           <label className="text-sm text-slate-300">
-            Mes de referencia
+            Mês de referência
             {availablePeriods.length ? (
               <Select value={periodMonth} onChange={(event) => void changePeriod(event.target.value)} className="mt-2 w-full">
                 {dedupePeriods(availablePeriods).map((period) => (
@@ -274,7 +274,7 @@ export function GoalManager({
               <Input type="month" value={periodMonth} onChange={(event) => void changePeriod(event.target.value)} className="mt-2 w-full" />
             )}
           </label>
-          <p className="mt-2 text-xs text-slate-500">Metas quantitativas usam os KPIs recalculados do mes; progresso manual substitui essa previa.</p>
+          <p className="mt-2 text-xs text-slate-500">Metas quantitativas usam os KPIs recalculados do mês; progresso manual substitui essa prévia.</p>
         </div>
         {loadingGoals ? <p className="mt-4 text-sm text-slate-400">Carregando metas...</p> : null}
         {message ? <p className="mt-4 rounded-md border border-line bg-ink p-3 text-sm text-slate-300">{message}</p> : null}
@@ -298,7 +298,7 @@ export function GoalManager({
           saveProgress={saveProgress}
         />
         <GoalSection
-          title="Medio prazo"
+          title="Médio prazo"
           goals={grouped.medium}
           progressForms={progressForms}
           setProgressForms={setProgressForms}
@@ -375,17 +375,17 @@ function GoalSection({
             <article key={goal.id} className="min-w-0 rounded-md border border-line bg-ink p-4">
               {isEditing ? (
                 <div className="grid gap-2">
-                  <Input value={editForm.title} onChange={(event) => setEditForm({ ...editForm, title: event.target.value })} className="w-full" aria-label="Titulo da meta" />
+                  <Input value={editForm.title} onChange={(event) => setEditForm({ ...editForm, title: event.target.value })} className="w-full" aria-label="Título da meta" />
                   <div className="grid gap-2 sm:grid-cols-2">
                     <Select value={editForm.horizon} onChange={(event) => setEditForm({ ...editForm, horizon: event.target.value as GoalForm["horizon"] })} aria-label="Horizonte da meta">
                       <option value="short">Curto prazo</option>
-                      <option value="medium">Medio prazo</option>
+                      <option value="medium">Médio prazo</option>
                       <option value="long">Longo prazo</option>
                     </Select>
                     <Select
                       value={editForm.comparisonOperator}
                       onChange={(event) => setEditForm({ ...editForm, comparisonOperator: event.target.value as GoalForm["comparisonOperator"] })}
-                      aria-label="Comparacao da meta"
+                      aria-label="Comparação da meta"
                     >
                       <option value="greater_or_equal">Maior e melhor</option>
                       <option value="less_or_equal">Menor e melhor</option>
@@ -393,7 +393,7 @@ function GoalSection({
                       <option value="manual">Manual</option>
                     </Select>
                   </div>
-                  <Input value={editForm.metricKey} onChange={(event) => setEditForm({ ...editForm, metricKey: event.target.value })} className="w-full" aria-label="Chave da metrica" />
+                  <Input value={editForm.metricKey} onChange={(event) => setEditForm({ ...editForm, metricKey: event.target.value })} className="w-full" aria-label="Chave da métrica" />
                   <div className="grid gap-2 sm:grid-cols-2">
                     <Input value={editForm.targetValue} onChange={(event) => setEditForm({ ...editForm, targetValue: event.target.value })} aria-label="Alvo da meta" />
                     <Input value={editForm.targetDate} onChange={(event) => setEditForm({ ...editForm, targetDate: event.target.value })} aria-label="Prazo da meta" />
@@ -409,7 +409,7 @@ function GoalSection({
                     <IconButton label="Salvar meta" disabled={savingId === goal.id || !editForm.title || !editForm.metricKey} onClick={() => void saveGoal(goal.id)}>
                       <Save className="h-4 w-4" />
                     </IconButton>
-                    <IconButton label="Cancelar edicao" onClick={cancelEdit}>
+                    <IconButton label="Cancelar edição" onClick={cancelEdit}>
                       <X className="h-4 w-4" />
                     </IconButton>
                   </div>
@@ -446,7 +446,7 @@ function GoalSection({
                   </div>
                   {goal.requiredCagr !== null ? (
                     <div className="mt-2 text-xs font-medium text-amber">
-                      CAGR necessario: {percent(goal.requiredCagr, 1)} a.a.
+                      CAGR necessário: {percent(goal.requiredCagr, 1)} a.a.
                     </div>
                   ) : null}
                   <div className="mt-4 grid gap-2">
@@ -493,7 +493,7 @@ function GoalSection({
                       >
                         <option value="in_progress">Em progresso</option>
                         <option value="achieved">Atingida</option>
-                        <option value="attention">Atencao</option>
+                        <option value="attention">Atenção</option>
                         <option value="long_term">Longo prazo</option>
                       </Select>
                       <IconButton label="Salvar progresso" onClick={() => void saveProgress(goal.id)}>

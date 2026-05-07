@@ -14,7 +14,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     await assertPersonInHousehold(input.personId, householdId);
     await assertAccountInHousehold(input.accountId, householdId, input.personId);
     const snapshot = await prisma.monthlySnapshot.findFirstOrThrow({ where: { id, householdId } });
-    if (snapshot.status !== "draft") return json({ error: "So e possivel editar posicoes em rascunho." }, { status: 409 });
+    if (snapshot.status !== "draft") return json({ error: "Só é possível editar posições em rascunho." }, { status: 409 });
     const position = await prisma.position.create({
       data: {
         snapshotId: id,

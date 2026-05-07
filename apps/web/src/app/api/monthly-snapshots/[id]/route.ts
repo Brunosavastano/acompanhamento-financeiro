@@ -32,7 +32,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     const { id } = await params;
     const input = patchSchema.parse(await request.json());
     const current = await prisma.monthlySnapshot.findFirstOrThrow({ where: { id, householdId } });
-    if (current.status !== "draft") return json({ error: "Snapshots fechados so podem ser alterados via revisao." }, { status: 409 });
+    if (current.status !== "draft") return json({ error: "Snapshots fechados só podem ser alterados via revisão." }, { status: 409 });
     const selic =
       input.selicAnnual !== undefined || input.refreshSelic
         ? await resolveSelicAnnualForPeriod(householdId, current.periodMonth, input.selicAnnual)
@@ -84,7 +84,7 @@ export async function DELETE(_request: Request, { params }: { params: Promise<{ 
       where: { id, householdId },
       include: { positions: true },
     });
-    if (current.status !== "draft") return json({ error: "Somente rascunhos podem ser excluidos." }, { status: 409 });
+    if (current.status !== "draft") return json({ error: "Somente rascunhos podem ser excluídos." }, { status: 409 });
 
     await prisma.monthlySnapshot.delete({ where: { id } });
     await audit({ userId, entityType: "monthly_snapshot", entityId: id, action: "delete", oldValue: current });

@@ -66,7 +66,7 @@ type SnapshotPreview = {
 
 const categoryLabels: Record<SnapshotPosition["category"], string> = {
   cash: "Caixa",
-  benefit: "Beneficio",
+  benefit: "Benefício",
   investment: "Investimento",
   cashback: "Cashback",
 };
@@ -95,7 +95,7 @@ export function BalanceSheetManager({ history }: { history: HistoryRow[] }) {
         fetch(`/api/monthly-snapshots/${id}/preview`),
       ]);
       if (!detailResponse.ok || !previewResponse.ok) {
-        throw new Error("Nao foi possivel carregar o balancete selecionado.");
+        throw new Error("Não foi possível carregar o balancete selecionado.");
       }
       setDetail(await detailResponse.json());
       setPreview(await previewResponse.json());
@@ -114,7 +114,7 @@ export function BalanceSheetManager({ history }: { history: HistoryRow[] }) {
     return (
       <Panel>
         <h2 className="text-base font-semibold text-white">Nenhum balancete encontrado</h2>
-        <p className="mt-2 text-sm text-slate-400">Importe a planilha ou crie um fechamento mensal para iniciar o historico.</p>
+        <p className="mt-2 text-sm text-slate-400">Importe a planilha ou crie um fechamento mensal para iniciar o histórico.</p>
       </Panel>
     );
   }
@@ -123,20 +123,20 @@ export function BalanceSheetManager({ history }: { history: HistoryRow[] }) {
     <div className="grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
       <Panel className="overflow-hidden p-0">
         <div className="border-b border-line px-4 py-3">
-          <h2 className="text-base font-semibold text-white">Historico mensal</h2>
-          <p className="mt-1 text-sm text-slate-400">Selecione um mes para ver contas, pessoas, categorias e indicadores recalculados.</p>
+          <h2 className="text-base font-semibold text-white">Histórico mensal</h2>
+          <p className="mt-1 text-sm text-slate-400">Selecione um mês para ver contas, pessoas, categorias e indicadores recalculados.</p>
         </div>
         <div className="overflow-x-auto">
           <table className="min-w-full divide-y divide-line text-sm">
             <thead className="bg-panel2 text-xs uppercase tracking-[0.12em] text-slate-500">
               <tr>
-                <Th>Mes</Th>
+                <Th>Mês</Th>
                 <Th>Status</Th>
                 <Th>Caixa</Th>
                 <Th>Investimentos</Th>
-                <Th>Divida PV</Th>
+                <Th>Dívida PV</Th>
                 <Th>PL Total</Th>
-                <Th>Variacao</Th>
+                <Th>Variação</Th>
                 <Th>D/A</Th>
                 <Th>Reserva</Th>
                 <Th>Tx. Poup.</Th>
@@ -178,7 +178,7 @@ export function BalanceSheetManager({ history }: { history: HistoryRow[] }) {
           <div>
             <h2 className="text-base font-semibold text-white">{selectedRow ? `Balancete ${selectedRow.month}` : "Balancete"}</h2>
             <p className="mt-1 text-sm text-slate-400">
-              {detail ? `${statusLabels[detail.status] ?? detail.status} - revisao ${detail.revisionNumber}` : "Carregando detalhamento"}
+              {detail ? `${statusLabels[detail.status] ?? detail.status} - revisão ${detail.revisionNumber}` : "Carregando detalhamento"}
             </p>
           </div>
           {selectedId ? (
@@ -195,10 +195,10 @@ export function BalanceSheetManager({ history }: { history: HistoryRow[] }) {
           <div className="mt-4 grid gap-3 sm:grid-cols-2">
             <Metric label="PL total" value={currency(preview.kpis.netWorth)} tone="text-cyan" />
             <Metric label="Ativos" value={currency(preview.kpis.assetsTotal)} />
-            <Metric label="Divida PV" value={currency(preview.kpis.debtPvTotal)} />
+            <Metric label="Dívida PV" value={currency(preview.kpis.debtPvTotal)} />
             <Metric label="Reserva" value={`${number(preview.kpis.reserveMonths, 2)} meses`} />
-            <Metric label="Poupanca patrimonial" value={percent(preview.kpis.patrimonialSavingsRate, 1)} />
-            <Metric label="Poupanca orcamentaria" value={percent(preview.kpis.budgetSavingsRate, 1)} />
+            <Metric label="Poupança patrimonial" value={percent(preview.kpis.patrimonialSavingsRate, 1)} />
+            <Metric label="Poupança orçamentária" value={percent(preview.kpis.budgetSavingsRate, 1)} />
           </div>
         ) : null}
 
@@ -209,15 +209,15 @@ export function BalanceSheetManager({ history }: { history: HistoryRow[] }) {
               <span>Despesa: {currency(preview.budget.expenseTotal)}</span>
               <span>Sobra: {currency(preview.budget.monthlySurplus)}</span>
               <span>
-                Cartao media: {currency(preview.budget.cardMovingAverageExpense ?? 0)}
-                {preview.budget.cardMovingAverageApplied === false ? " (ja coberto)" : ""}
+                Cartão média: {currency(preview.budget.cardMovingAverageExpense ?? 0)}
+                {preview.budget.cardMovingAverageApplied === false ? " (já coberto)" : ""}
               </span>
             </div>
           </div>
         ) : null}
 
         <div className="mt-4">
-          <h3 className="text-sm font-semibold text-white">Posicoes</h3>
+          <h3 className="text-sm font-semibold text-white">Posições</h3>
           <div className="mt-2 max-h-[520px] overflow-auto rounded-md border border-line">
             <table className="min-w-full text-sm">
               <thead className="sticky top-0 bg-panel2 text-left text-xs uppercase tracking-[0.12em] text-slate-500">
@@ -239,7 +239,7 @@ export function BalanceSheetManager({ history }: { history: HistoryRow[] }) {
                 ))}
               </tbody>
             </table>
-            {!detail && !isLoading ? <p className="p-4 text-sm text-slate-400">Selecione um mes para carregar as posicoes.</p> : null}
+            {!detail && !isLoading ? <p className="p-4 text-sm text-slate-400">Selecione um mês para carregar as posições.</p> : null}
             {isLoading ? <p className="p-4 text-sm text-slate-400">Carregando balancete...</p> : null}
           </div>
         </div>

@@ -74,7 +74,7 @@ const statusLabels: Record<Snapshot["status"], string> = {
 export function MonthlyCloseWizard({ defaultPeriod, defaultSelicAnnual, accounts }: { defaultPeriod: string; defaultSelicAnnual: string; accounts: AccountSeed[] }) {
   const [periodMonth, setPeriodMonth] = useState(defaultPeriod.slice(0, 7));
   const [selicAnnual, setSelicAnnual] = useState(defaultSelicAnnual);
-  const [selicStatus, setSelicStatus] = useState("Selic Bacen carregada para o mes selecionado.");
+  const [selicStatus, setSelicStatus] = useState("Selic Bacen carregada para o mês selecionado.");
   const [selicLoading, setSelicLoading] = useState(false);
   const [notes, setNotes] = useState("");
   const [snapshots, setSnapshots] = useState<Snapshot[]>([]);
@@ -134,7 +134,7 @@ export function MonthlyCloseWizard({ defaultPeriod, defaultSelicAnnual, accounts
     if (options?.message) setMessage(options.message);
     void loadReview(period).catch(() => {
       setReview(null);
-      setMessage((current) => current ?? "Nao foi possivel carregar a revisao de dividas e orcamento.");
+      setMessage((current) => current ?? "Não foi possível carregar a revisão de dívidas e orçamento.");
     });
   }
 
@@ -143,7 +143,7 @@ export function MonthlyCloseWizard({ defaultPeriod, defaultSelicAnnual, accounts
       fetch(`/api/debts/summary?period_month=${period}`),
       fetch(`/api/budget?period_month=${period}`),
     ]);
-    if (!debtResponse.ok || !budgetResponse.ok) throw new Error("Nao foi possivel carregar a revisao de dividas e orcamento.");
+    if (!debtResponse.ok || !budgetResponse.ok) throw new Error("Não foi possível carregar a revisão de dívidas e orçamento.");
     const [debt, budget] = await Promise.all([debtResponse.json(), budgetResponse.json()]);
     setReview({ debt, budget: budget.metrics });
   }
@@ -157,14 +157,14 @@ export function MonthlyCloseWizard({ defaultPeriod, defaultSelicAnnual, accounts
       setSelicAnnual(String(body.annualRate));
       setSelicStatus(
         body.fallback
-          ? "Bacen indisponivel; usando a ultima Selic salva."
+          ? "Bacen indisponível; usando a última Selic salva."
           : body.providerDate
-            ? `Bacen SGS 432, observacao de ${body.providerDate}.`
+            ? `Bacen SGS 432, observação de ${body.providerDate}.`
             : "Bacen SGS 432.",
       );
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") return;
-      setSelicStatus("Nao foi possivel atualizar a Selic agora; mantendo o valor carregado.");
+      setSelicStatus("Não foi possível atualizar a Selic agora; mantendo o valor carregado.");
     } finally {
       if (!signal?.aborted) setSelicLoading(false);
     }
@@ -181,7 +181,7 @@ export function MonthlyCloseWizard({ defaultPeriod, defaultSelicAnnual, accounts
     try {
       await hydrateSnapshot(id);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Nao foi possivel carregar o snapshot.");
+      setMessage(error instanceof Error ? error.message : "Não foi possível carregar o snapshot.");
     } finally {
       setLoading(false);
     }
@@ -194,7 +194,7 @@ export function MonthlyCloseWizard({ defaultPeriod, defaultSelicAnnual, accounts
     setAmounts({});
     setPeriodMonth(defaultPeriod.slice(0, 7));
     setSelicAnnual(defaultSelicAnnual);
-    setSelicStatus("Selic Bacen carregada para o mes selecionado.");
+    setSelicStatus("Selic Bacen carregada para o mês selecionado.");
     setNotes("");
   }
 
@@ -212,7 +212,7 @@ export function MonthlyCloseWizard({ defaultPeriod, defaultSelicAnnual, accounts
       applySnapshot(created, { message: "Rascunho criado." });
       await loadSnapshots();
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Nao foi possivel criar o rascunho.");
+      setMessage(error instanceof Error ? error.message : "Não foi possível criar o rascunho.");
     } finally {
       setLoading(false);
     }
@@ -233,10 +233,10 @@ export function MonthlyCloseWizard({ defaultPeriod, defaultSelicAnnual, accounts
       setSnapshot({ ...snapshot, selicAnnual: updated.selicAnnual, notes: updated.notes });
       setPreview(null);
       await loadReview(periodMonth);
-      setMessage("Dados do rascunho salvos. Recalcule a previa antes de fechar.");
+      setMessage("Dados do rascunho salvos. Recalcule a prévia antes de fechar.");
       await loadSnapshots();
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Nao foi possivel salvar os dados do rascunho.");
+      setMessage(error instanceof Error ? error.message : "Não foi possível salvar os dados do rascunho.");
     } finally {
       setLoading(false);
     }
@@ -260,10 +260,10 @@ export function MonthlyCloseWizard({ defaultPeriod, defaultSelicAnnual, accounts
       setSelicStatus("Selic atualizada pelo Bacen e gravada no rascunho.");
       setPreview(null);
       await loadReview(periodMonth);
-      setMessage("Selic atualizada pelo Bacen. Recalcule a previa antes de fechar.");
+      setMessage("Selic atualizada pelo Bacen. Recalcule a prévia antes de fechar.");
       await loadSnapshots();
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Nao foi possivel atualizar a Selic pelo Bacen.");
+      setMessage(error instanceof Error ? error.message : "Não foi possível atualizar a Selic pelo Bacen.");
     } finally {
       setSelicLoading(false);
       setLoading(false);
@@ -278,14 +278,14 @@ export function MonthlyCloseWizard({ defaultPeriod, defaultSelicAnnual, accounts
       const response = await fetch(`/api/monthly-snapshots/${snapshot.id}/revise`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ notes: `Revisao criada a partir da versao ${snapshot.revisionNumber}` }),
+        body: JSON.stringify({ notes: `Revisão criada a partir da versão ${snapshot.revisionNumber}` }),
       });
       if (!response.ok) throw new Error(await readApiError(response));
       const created = await response.json();
-      await hydrateSnapshot(created.id, { message: "Revisao criada como rascunho." });
+      await hydrateSnapshot(created.id, { message: "Revisão criada como rascunho." });
       await loadSnapshots();
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Nao foi possivel criar a revisao.");
+      setMessage(error instanceof Error ? error.message : "Não foi possível criar a revisão.");
     } finally {
       setLoading(false);
     }
@@ -293,7 +293,7 @@ export function MonthlyCloseWizard({ defaultPeriod, defaultSelicAnnual, accounts
 
   async function deleteDraft() {
     if (!snapshot || snapshot.status !== "draft") return;
-    const confirmed = window.confirm("Excluir este rascunho? Os saldos informados nele serao descartados.");
+    const confirmed = window.confirm("Excluir este rascunho? Os saldos informados nele serão descartados.");
     if (!confirmed) return;
     setLoading(true);
     setMessage(null);
@@ -302,9 +302,9 @@ export function MonthlyCloseWizard({ defaultPeriod, defaultSelicAnnual, accounts
       if (!response.ok) throw new Error(await readApiError(response));
       resetSelection();
       await loadSnapshots();
-      setMessage("Rascunho excluido.");
+      setMessage("Rascunho excluído.");
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Nao foi possivel excluir o rascunho.");
+      setMessage(error instanceof Error ? error.message : "Não foi possível excluir o rascunho.");
     } finally {
       setLoading(false);
     }
@@ -331,10 +331,10 @@ export function MonthlyCloseWizard({ defaultPeriod, defaultSelicAnnual, accounts
       const response = await fetch(`/api/monthly-snapshots/${snapshot.id}/preview`);
       if (!response.ok) throw new Error(await readApiError(response));
       setPreview(await response.json());
-      setMessage("Saldos salvos e previa recalculada.");
+      setMessage("Saldos salvos e prévia recalculada.");
       void loadReview(periodMonth).catch(() => undefined);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Nao foi possivel salvar os saldos.");
+      setMessage(error instanceof Error ? error.message : "Não foi possível salvar os saldos.");
     } finally {
       setLoading(false);
     }
@@ -344,7 +344,7 @@ export function MonthlyCloseWizard({ defaultPeriod, defaultSelicAnnual, accounts
     if (!snapshot) return;
     const account = accounts.find((item) => item.id === newPositionAccountId);
     if (!account) {
-      setMessage("Selecione uma conta para adicionar a posicao.");
+      setMessage("Selecione uma conta para adicionar a posição.");
       return;
     }
     setLoading(true);
@@ -366,10 +366,10 @@ export function MonthlyCloseWizard({ defaultPeriod, defaultSelicAnnual, accounts
       setSnapshot((current) => (current ? { ...current, positions: [...current.positions, created] } : current));
       setAmounts((current) => ({ ...current, [created.id]: String(created.amount) }));
       setPreview(null);
-      setMessage("Posicao adicionada ao rascunho.");
+      setMessage("Posição adicionada ao rascunho.");
       void loadReview(periodMonth).catch(() => undefined);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Nao foi possivel adicionar a posicao.");
+      setMessage(error instanceof Error ? error.message : "Não foi possível adicionar a posição.");
     } finally {
       setLoading(false);
     }
@@ -389,10 +389,10 @@ export function MonthlyCloseWizard({ defaultPeriod, defaultSelicAnnual, accounts
         return next;
       });
       setPreview(null);
-      setMessage("Posicao removida do rascunho.");
+      setMessage("Posição removida do rascunho.");
       void loadReview(periodMonth).catch(() => undefined);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Nao foi possivel remover a posicao.");
+      setMessage(error instanceof Error ? error.message : "Não foi possível remover a posição.");
     } finally {
       setLoading(false);
     }
@@ -408,10 +408,10 @@ export function MonthlyCloseWizard({ defaultPeriod, defaultSelicAnnual, accounts
       const body = await response.json();
       setPreview(body.metrics);
       setSnapshot({ ...snapshot, status: "closed" });
-      setMessage("Mes fechado com sucesso.");
+      setMessage("Mês fechado com sucesso.");
       await loadSnapshots();
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Nao foi possivel fechar o mes.");
+      setMessage(error instanceof Error ? error.message : "Não foi possível fechar o mês.");
     } finally {
       setLoading(false);
     }
@@ -422,10 +422,10 @@ export function MonthlyCloseWizard({ defaultPeriod, defaultSelicAnnual, accounts
   return (
     <div className="grid gap-4 xl:grid-cols-[0.9fr_1.1fr]">
       <Panel>
-        <h2 className="text-base font-semibold text-white">1. Selecionar mes</h2>
+        <h2 className="text-base font-semibold text-white">1. Selecionar mês</h2>
         <div className="mt-4 grid gap-3 sm:grid-cols-2">
           <label className="text-sm text-slate-300">
-            Mes
+            Mês
             <Input value={periodMonth} onChange={(event) => setPeriodMonth(event.target.value)} type="month" className="mt-2 w-full" disabled={!!snapshot} />
           </label>
           <div className="rounded-md border border-line bg-ink px-3 py-2">
@@ -488,7 +488,7 @@ export function MonthlyCloseWizard({ defaultPeriod, defaultSelicAnnual, accounts
           {snapshot ? (
             <button type="button" onClick={resetSelection} className="focus-ring inline-flex items-center gap-2 rounded-md border border-line px-4 py-2 text-sm font-semibold text-slate-200 hover:border-cyan">
               <RotateCcw className="h-4 w-4" />
-              Trocar mes
+              Trocar mês
             </button>
           ) : null}
         </div>
@@ -509,7 +509,7 @@ export function MonthlyCloseWizard({ defaultPeriod, defaultSelicAnnual, accounts
           {snapshot?.status === "closed" ? (
             <Button onClick={createRevision} disabled={loading} className="mt-3 border border-line bg-panel2 text-white">
               <Plus className="h-4 w-4" />
-              Criar revisao
+              Criar revisão
             </Button>
           ) : null}
         </div>
@@ -535,7 +535,7 @@ export function MonthlyCloseWizard({ defaultPeriod, defaultSelicAnnual, accounts
 
       <Panel>
         <div className="flex flex-wrap items-start justify-between gap-3">
-          <h2 className="text-base font-semibold text-white">2. Informar saldos e previa</h2>
+          <h2 className="text-base font-semibold text-white">2. Informar saldos e prévia</h2>
           {snapshot ? <span className="rounded-md border border-line px-2 py-1 text-xs text-slate-400">{statusLabels[snapshot.status]} rev {snapshot.revisionNumber}</span> : null}
         </div>
         {!snapshot ? (
@@ -544,7 +544,7 @@ export function MonthlyCloseWizard({ defaultPeriod, defaultSelicAnnual, accounts
           <>
             {canEdit ? (
               <div className="mt-4 rounded-md border border-line bg-ink p-3">
-                <h3 className="text-sm font-semibold text-white">Adicionar posicao manual</h3>
+                <h3 className="text-sm font-semibold text-white">Adicionar posição manual</h3>
                 <div className="mt-3 grid gap-3 md:grid-cols-[1fr_0.5fr_auto]">
                   <Select value={newPositionAccountId} onChange={(event) => setNewPositionAccountId(event.target.value)} className="w-full">
                     {accounts.map((account) => (
@@ -594,8 +594,8 @@ export function MonthlyCloseWizard({ defaultPeriod, defaultSelicAnnual, accounts
                         onClick={() => void deletePosition(position.id)}
                         disabled={loading}
                         className="focus-ring mt-7 inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-line text-slate-400 hover:border-red-400 hover:text-red-300 disabled:cursor-not-allowed disabled:opacity-60"
-                        aria-label={`Remover posicao ${position.person.name} ${position.account?.name ?? position.category}`}
-                        title="Remover posicao"
+                        aria-label={`Remover posição ${position.person.name} ${position.account?.name ?? position.category}`}
+                        title="Remover posição"
                       >
                         <Trash2 className="h-4 w-4" />
                       </button>
@@ -611,41 +611,41 @@ export function MonthlyCloseWizard({ defaultPeriod, defaultSelicAnnual, accounts
               </Button>
               <Button onClick={closeSnapshot} disabled={loading || !preview || !canEdit} className="bg-green text-ink">
                 <Check className="h-4 w-4" />
-                Fechar mes
+                Fechar mês
               </Button>
             </div>
             <div className="mt-6 rounded-md border border-line bg-ink p-4">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
-                  <h3 className="text-sm font-semibold text-white">3. Revisar dividas e orcamento</h3>
-                  <p className="mt-1 text-sm text-slate-400">Resumo usado na previa antes de fechar {periodMonth}.</p>
+                  <h3 className="text-sm font-semibold text-white">3. Revisar dívidas e orçamento</h3>
+                  <p className="mt-1 text-sm text-slate-400">Resumo usado na prévia antes de fechar {periodMonth}.</p>
                 </div>
                 <div className="flex flex-wrap gap-2">
                   <Link href={`/dividas?period_month=${periodMonth}`} className="focus-ring inline-flex items-center gap-2 rounded-md border border-line px-3 py-2 text-xs font-semibold text-slate-200 hover:border-cyan">
                     <CreditCard className="h-3.5 w-3.5" />
-                    Dividas
+                    Dívidas
                   </Link>
                   <Link href={`/orcamento?period_month=${periodMonth}`} className="focus-ring inline-flex items-center gap-2 rounded-md border border-line px-3 py-2 text-xs font-semibold text-slate-200 hover:border-cyan">
                     <WalletCards className="h-3.5 w-3.5" />
-                    Orcamento
+                    Orçamento
                   </Link>
                 </div>
               </div>
               {review ? (
                 <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-                  <Metric label="Divida PV" value={currency(review.debt.presentValueTotal)} />
-                  <Metric label="Fatura do mes" value={currency(review.debt.monthlyInvoiceTotal)} />
+                  <Metric label="Dívida PV" value={currency(review.debt.presentValueTotal)} />
+                  <Metric label="Fatura do mês" value={currency(review.debt.monthlyInvoiceTotal)} />
                   <Metric label="Float" value={currency(review.debt.floatGain)} />
-                  <Metric label="Receita orcada" value={currency(review.budget.incomeTotal)} />
-                  <Metric label="Despesa orcada" value={currency(review.budget.expenseTotal)} />
-                  <Metric label="Sobra orcada" value={currency(review.budget.monthlySurplus)} />
+                  <Metric label="Receita orçada" value={currency(review.budget.incomeTotal)} />
+                  <Metric label="Despesa orçada" value={currency(review.budget.expenseTotal)} />
+                  <Metric label="Sobra orçada" value={currency(review.budget.monthlySurplus)} />
                 </div>
               ) : (
-                <p className="mt-4 text-sm text-slate-500">Crie ou selecione um rascunho para carregar a revisao.</p>
+                <p className="mt-4 text-sm text-slate-500">Crie ou selecione um rascunho para carregar a revisão.</p>
               )}
               {review?.budget.cardMovingAverageMonths ? (
                 <p className="mt-3 text-xs text-slate-500">
-                  Cartao no orcamento: {currency(review.budget.cardMovingAverageAppliedExpense)} pela media movel de {review.budget.cardMovingAverageMonths} mes(es).
+                  Cartão no orçamento: {currency(review.budget.cardMovingAverageAppliedExpense)} pela média móvel de {review.budget.cardMovingAverageMonths} mês(es).
                 </p>
               ) : null}
             </div>
@@ -654,11 +654,11 @@ export function MonthlyCloseWizard({ defaultPeriod, defaultSelicAnnual, accounts
         {preview ? (
           <div className="mt-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
             <Metric label="PL total" value={currency(preview.kpis.netWorth)} />
-            <Metric label="Variacao" value={currency(preview.kpis.monthlyVariation)} />
-            <Metric label="Divida/ativos" value={percent(preview.kpis.debtToAssets, 1)} />
+            <Metric label="Variação" value={currency(preview.kpis.monthlyVariation)} />
+            <Metric label="Dívida/ativos" value={percent(preview.kpis.debtToAssets, 1)} />
             <Metric label="Meses reserva" value={String(preview.kpis.reserveMonths.toFixed(2))} />
-            <Metric label="Poupanca patrimonial" value={percent(preview.kpis.patrimonialSavingsRate, 1)} />
-            <Metric label="Sobra orcamento" value={currency(preview.budget.monthlySurplus)} />
+            <Metric label="Poupança patrimonial" value={percent(preview.kpis.patrimonialSavingsRate, 1)} />
+            <Metric label="Sobra orçamento" value={currency(preview.budget.monthlySurplus)} />
           </div>
         ) : null}
         {message ? <p className="mt-4 rounded-md border border-line bg-ink p-3 text-sm text-slate-300">{message}</p> : null}

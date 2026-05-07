@@ -12,7 +12,7 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
     const { id } = await params;
     const current = await prisma.monthlySnapshot.findFirstOrThrow({ where: { id, householdId } });
     if (current.status !== "draft") {
-      return json({ error: "Somente rascunhos podem ser fechados. Crie uma revisao para alterar um fechamento." }, { status: 409 });
+      return json({ error: "Somente rascunhos podem ser fechados. Crie uma revisão para alterar um fechamento." }, { status: 409 });
     }
     const metrics = await calculateSnapshotMetrics(householdId, id);
     const { updated, interestRateChange } = await prisma.$transaction(async (tx) => {

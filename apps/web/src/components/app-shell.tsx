@@ -19,11 +19,11 @@ const nav = [
   { href: "/dashboard", label: "Dashboard", icon: BarChart3 },
   { href: "/fechamento", label: "Fechamento mensal", icon: CalendarCheck },
   { href: "/balancetes", label: "Balancetes", icon: Table2 },
-  { href: "/dividas", label: "Dividas", icon: CreditCard },
-  { href: "/orcamento", label: "Orcamento", icon: CircleDollarSign },
+  { href: "/dividas", label: "Dívidas", icon: CreditCard },
+  { href: "/orcamento", label: "Orçamento", icon: CircleDollarSign },
   { href: "/metas", label: "Metas", icon: Flag },
-  { href: "/relatorios", label: "Relatorios", icon: ClipboardList },
-  { href: "/configuracoes", label: "Configuracoes", icon: Settings },
+  { href: "/relatorios", label: "Relatórios", icon: ClipboardList },
+  { href: "/configuracoes", label: "Configurações", icon: Settings },
 ];
 
 export async function AppShell({ children }: { children: React.ReactNode }) {
@@ -37,7 +37,7 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
           <BrandLogo />
           <div>
             <div className="text-sm font-semibold text-white">Financeiro Familiar</div>
-            <div className="text-xs text-slate-400">Familia Savastano</div>
+            <div className="text-xs text-slate-400">Família Savastano</div>
           </div>
         </Link>
         <nav className="mt-8 space-y-1">
