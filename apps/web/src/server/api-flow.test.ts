@@ -1,7 +1,7 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { prisma } from "@/lib/prisma";
 import { POST as createSnapshot } from "@/app/api/monthly-snapshots/route";
-import { PATCH as updateSnapshot } from "@/app/api/monthly-snapshots/[id]/route";
+import { DELETE as deleteSnapshot, PATCH as updateSnapshot } from "@/app/api/monthly-snapshots/[id]/route";
 import { GET as previewSnapshot } from "@/app/api/monthly-snapshots/[id]/preview/route";
 import { POST as closeSnapshot } from "@/app/api/monthly-snapshots/[id]/close/route";
 import { POST as reviseSnapshot } from "@/app/api/monthly-snapshots/[id]/revise/route";
@@ -205,6 +205,9 @@ describe.skipIf(!runDbTests)("API route integration flows", () => {
     const closedMetadataResponse = await updateSnapshot(jsonRequest({ notes: "Nao deve alterar fechado" }), routeParams({ id: snapshot.id }));
     expect(closedMetadataResponse.status).toBe(409);
 
+    const closedDeleteSnapshotResponse = await deleteSnapshot(new Request("http://test.local", { method: "DELETE" }), routeParams({ id: snapshot.id }));
+    expect(closedDeleteSnapshotResponse.status).toBe(409);
+
     const metricGoalResponse = await createGoal(
       jsonRequest({
         title: "PL de teste",
@@ -259,6 +262,10 @@ describe.skipIf(!runDbTests)("API route integration flows", () => {
 
     const futureDraftResponse = await createSnapshot(jsonRequest({ periodMonth: "2035-12", selicAnnual: 0.12 }));
     expect(futureDraftResponse.status).toBe(201);
+    const futureDraft = await futureDraftResponse.json();
+    const deleteDraftResponse = await deleteSnapshot(new Request("http://test.local", { method: "DELETE" }), routeParams({ id: futureDraft.id }));
+    expect(deleteDraftResponse.status).toBe(200);
+    await expect(prisma.monthlySnapshot.findUnique({ where: { id: futureDraft.id } })).resolves.toBeNull();
 
     const defaultDashboardResponse = await getDashboard(new Request("http://test.local/api/dashboard"));
     expect(defaultDashboardResponse.status).toBe(200);

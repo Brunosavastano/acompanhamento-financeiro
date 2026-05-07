@@ -76,6 +76,15 @@ test.describe.serial("private finance app", () => {
 
     await page.getByRole("button", { name: "Fechar mes" }).click();
     await expect(page.getByText("Mes fechado com sucesso.")).toBeVisible({ timeout: 30_000 });
+
+    await page.getByRole("button", { name: "Trocar mes" }).click();
+    await page.getByLabel("Mes").fill("2098-04");
+    await page.getByRole("button", { name: "Criar rascunho" }).click();
+    await expect(page.getByText("Rascunho criado.")).toBeVisible({ timeout: 30_000 });
+    page.once("dialog", (dialog) => dialog.accept());
+    await page.getByRole("button", { name: "Excluir rascunho" }).click();
+    await expect(page.getByText("Rascunho excluido.")).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByText("Crie ou selecione um rascunho")).toBeVisible();
   });
 
   test("updates a debt cashflow and confirms it is present in backup", async ({ page }) => {

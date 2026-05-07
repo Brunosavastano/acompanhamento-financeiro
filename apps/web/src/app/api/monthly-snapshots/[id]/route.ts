@@ -74,3 +74,22 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     return errorResponse(error);
   }
 }
+
+export async function DELETE(_request: Request, { params }: { params: Promise<{ id: string }> }) {
+  try {
+    const householdId = await getRequiredHouseholdId();
+    const userId = await getCurrentUserId();
+    const { id } = await params;
+    const current = await prisma.monthlySnapshot.findFirstOrThrow({
+      where: { id, householdId },
+      include: { positions: true },
+    });
+    if (current.status !== "draft") return json({ error: "Somente rascunhos podem ser excluidos." }, { status: 409 });
+
+    await prisma.monthlySnapshot.delete({ where: { id } });
+    await audit({ userId, entityType: "monthly_snapshot", entityId: id, action: "delete", oldValue: current });
+    return json({ ok: true });
+  } catch (error) {
+    return errorResponse(error);
+  }
+}

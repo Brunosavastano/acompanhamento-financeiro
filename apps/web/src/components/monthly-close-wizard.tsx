@@ -291,6 +291,25 @@ export function MonthlyCloseWizard({ defaultPeriod, defaultSelicAnnual, accounts
     }
   }
 
+  async function deleteDraft() {
+    if (!snapshot || snapshot.status !== "draft") return;
+    const confirmed = window.confirm("Excluir este rascunho? Os saldos informados nele serao descartados.");
+    if (!confirmed) return;
+    setLoading(true);
+    setMessage(null);
+    try {
+      const response = await fetch(`/api/monthly-snapshots/${snapshot.id}`, { method: "DELETE" });
+      if (!response.ok) throw new Error(await readApiError(response));
+      resetSelection();
+      await loadSnapshots();
+      setMessage("Rascunho excluido.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Nao foi possivel excluir o rascunho.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
   async function savePositions() {
     if (!snapshot) return;
     setLoading(true);
@@ -453,6 +472,17 @@ export function MonthlyCloseWizard({ defaultPeriod, defaultSelicAnnual, accounts
             >
               {selicLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RotateCcw className="h-4 w-4" />}
               Atualizar Selic
+            </button>
+          ) : null}
+          {canEdit ? (
+            <button
+              type="button"
+              onClick={() => void deleteDraft()}
+              disabled={loading}
+              className="focus-ring inline-flex items-center gap-2 rounded-md border border-magenta/50 px-4 py-2 text-sm font-semibold text-magenta hover:border-magenta disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <Trash2 className="h-4 w-4" />
+              Excluir rascunho
             </button>
           ) : null}
           {snapshot ? (
