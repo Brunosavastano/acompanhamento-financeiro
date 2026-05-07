@@ -9,7 +9,7 @@ export const moneySchema = z.coerce.number().finite();
 
 export const createSnapshotSchema = z.object({
   periodMonth: periodMonthSchema,
-  selicAnnual: z.coerce.number().min(0).max(1),
+  selicAnnual: z.coerce.number().min(0).max(1).optional(),
   notes: z.string().max(2000).optional(),
 });
 

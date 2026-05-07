@@ -4,7 +4,7 @@ import { errorResponse, json } from "@/lib/api";
 import { asMonthStart } from "@/lib/date";
 import { prisma } from "@/lib/prisma";
 import { audit } from "@/server/audit";
-import { upsertManualSelicRate } from "@/server/interest-rates";
+import { resolveSelicAnnualForPeriod, upsertSelicRate } from "@/server/interest-rates";
 
 export async function GET() {
   try {
@@ -26,6 +26,7 @@ export async function POST(request: Request) {
     const userId = await getCurrentUserId();
     const input = createSnapshotSchema.parse(await request.json());
     const periodMonth = asMonthStart(input.periodMonth);
+    const selic = await resolveSelicAnnualForPeriod(householdId, periodMonth, input.selicAnnual);
 
     const existing = await prisma.monthlySnapshot.findFirst({
       where: { householdId, periodMonth },
@@ -53,7 +54,7 @@ export async function POST(request: Request) {
         data: {
           householdId,
           periodMonth,
-          selicAnnual: input.selicAnnual,
+          selicAnnual: selic.annualRate,
           status: "draft",
           notes: input.notes,
         },
@@ -70,10 +71,11 @@ export async function POST(request: Request) {
         })),
       });
 
-      const interestRateChange = await upsertManualSelicRate(tx, {
+      const interestRateChange = await upsertSelicRate(tx, {
         householdId,
         periodMonth,
-        annualRate: input.selicAnnual,
+        annualRate: selic.annualRate,
+        source: selic.source,
       });
 
       const hydratedSnapshot = await tx.monthlySnapshot.findFirstOrThrow({

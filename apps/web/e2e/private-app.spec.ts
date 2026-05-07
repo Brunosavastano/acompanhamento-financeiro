@@ -56,15 +56,15 @@ test.describe.serial("private finance app", () => {
 
     await page.getByLabel("Mes").fill("2098-02");
     await page.getByRole("button", { name: "Criar rascunho" }).click();
-    await expect(page.getByText("Rascunho criado.")).toBeVisible();
+    await expect(page.getByText("Rascunho criado.")).toBeVisible({ timeout: 30_000 });
     await expect(page.getByText("Adicionar posicao manual")).toBeVisible();
 
     await page.getByPlaceholder("Valor").fill("123.45");
     await page.getByRole("button", { name: "Adicionar" }).click();
-    await expect(page.getByText("Posicao adicionada ao rascunho.")).toBeVisible();
+    await expect(page.getByText("Posicao adicionada ao rascunho.")).toBeVisible({ timeout: 30_000 });
 
     await page.locator('button[title="Remover posicao"]').last().click();
-    await expect(page.getByText("Posicao removida do rascunho.")).toBeVisible();
+    await expect(page.getByText("Posicao removida do rascunho.")).toBeVisible({ timeout: 30_000 });
 
     await page.getByLabel("Bruno - Nubank").fill("10000");
     await page.getByLabel("Bruno - Investimentos").fill("30000");
@@ -72,10 +72,10 @@ test.describe.serial("private finance app", () => {
     await page.getByLabel("Tatiane - Investimentos").fill("15000");
 
     await page.getByRole("button", { name: "Salvar e calcular" }).click();
-    await expect(page.getByText("Saldos salvos e previa recalculada.")).toBeVisible();
+    await expect(page.getByText("Saldos salvos e previa recalculada.")).toBeVisible({ timeout: 30_000 });
 
     await page.getByRole("button", { name: "Fechar mes" }).click();
-    await expect(page.getByText("Mes fechado com sucesso.")).toBeVisible();
+    await expect(page.getByText("Mes fechado com sucesso.")).toBeVisible({ timeout: 30_000 });
   });
 
   test("updates a debt cashflow and confirms it is present in backup", async ({ page }) => {

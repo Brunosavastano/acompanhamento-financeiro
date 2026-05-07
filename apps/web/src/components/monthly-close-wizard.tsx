@@ -74,6 +74,8 @@ const statusLabels: Record<Snapshot["status"], string> = {
 export function MonthlyCloseWizard({ defaultPeriod, defaultSelicAnnual, accounts }: { defaultPeriod: string; defaultSelicAnnual: string; accounts: AccountSeed[] }) {
   const [periodMonth, setPeriodMonth] = useState(defaultPeriod.slice(0, 7));
   const [selicAnnual, setSelicAnnual] = useState(defaultSelicAnnual);
+  const [selicStatus, setSelicStatus] = useState("Selic Bacen carregada para o mes selecionado.");
+  const [selicLoading, setSelicLoading] = useState(false);
   const [notes, setNotes] = useState("");
   const [snapshots, setSnapshots] = useState<Snapshot[]>([]);
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
@@ -99,6 +101,13 @@ export function MonthlyCloseWizard({ defaultPeriod, defaultSelicAnnual, accounts
     void loadSnapshots();
   }, []);
 
+  useEffect(() => {
+    if (snapshot) return;
+    const controller = new AbortController();
+    void loadSelicForPeriod(periodMonth, controller.signal);
+    return () => controller.abort();
+  }, [periodMonth, snapshot]);
+
   async function loadSnapshots() {
     const response = await fetch("/api/monthly-snapshots");
     if (!response.ok) return;
@@ -117,6 +126,7 @@ export function MonthlyCloseWizard({ defaultPeriod, defaultSelicAnnual, accounts
     setSnapshot(hydrated);
     setPeriodMonth(period);
     setSelicAnnual(String(hydrated.selicAnnual));
+    setSelicStatus("Selic gravada no rascunho.");
     setNotes(hydrated.notes ?? "");
     setAmounts(Object.fromEntries(hydrated.positions.map((position) => [position.id, String(position.amount)])));
     setPreview(null);
@@ -136,6 +146,28 @@ export function MonthlyCloseWizard({ defaultPeriod, defaultSelicAnnual, accounts
     if (!debtResponse.ok || !budgetResponse.ok) throw new Error("Nao foi possivel carregar a revisao de dividas e orcamento.");
     const [debt, budget] = await Promise.all([debtResponse.json(), budgetResponse.json()]);
     setReview({ debt, budget: budget.metrics });
+  }
+
+  async function loadSelicForPeriod(period: string, signal?: AbortSignal) {
+    setSelicLoading(true);
+    try {
+      const response = await fetch(`/api/interest-rates/selic?period_month=${period}`, { signal });
+      if (!response.ok) throw new Error(await readApiError(response));
+      const body = (await response.json()) as { annualRate: string; providerDate: string | null; fallback: boolean };
+      setSelicAnnual(String(body.annualRate));
+      setSelicStatus(
+        body.fallback
+          ? "Bacen indisponivel; usando a ultima Selic salva."
+          : body.providerDate
+            ? `Bacen SGS 432, observacao de ${body.providerDate}.`
+            : "Bacen SGS 432.",
+      );
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") return;
+      setSelicStatus("Nao foi possivel atualizar a Selic agora; mantendo o valor carregado.");
+    } finally {
+      if (!signal?.aborted) setSelicLoading(false);
+    }
   }
 
   async function selectSnapshot(event: ChangeEvent<HTMLSelectElement>) {
@@ -162,6 +194,7 @@ export function MonthlyCloseWizard({ defaultPeriod, defaultSelicAnnual, accounts
     setAmounts({});
     setPeriodMonth(defaultPeriod.slice(0, 7));
     setSelicAnnual(defaultSelicAnnual);
+    setSelicStatus("Selic Bacen carregada para o mes selecionado.");
     setNotes("");
   }
 
@@ -172,7 +205,7 @@ export function MonthlyCloseWizard({ defaultPeriod, defaultSelicAnnual, accounts
       const response = await fetch("/api/monthly-snapshots", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ periodMonth: `${periodMonth}-01`, selicAnnual: Number(selicAnnual), notes: notes || undefined }),
+        body: JSON.stringify({ periodMonth: `${periodMonth}-01`, notes: notes || undefined }),
       });
       if (!response.ok) throw new Error(await readApiError(response));
       const created = (await response.json()) as Snapshot;
@@ -193,7 +226,7 @@ export function MonthlyCloseWizard({ defaultPeriod, defaultSelicAnnual, accounts
       const response = await fetch(`/api/monthly-snapshots/${snapshot.id}`, {
         method: "PATCH",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ selicAnnual: Number(selicAnnual), notes: notes || null }),
+        body: JSON.stringify({ notes: notes || null }),
       });
       if (!response.ok) throw new Error(await readApiError(response));
       const updated = (await response.json()) as Pick<Snapshot, "selicAnnual" | "notes">;
@@ -205,6 +238,34 @@ export function MonthlyCloseWizard({ defaultPeriod, defaultSelicAnnual, accounts
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Nao foi possivel salvar os dados do rascunho.");
     } finally {
+      setLoading(false);
+    }
+  }
+
+  async function refreshSnapshotSelic() {
+    if (!snapshot) return;
+    setLoading(true);
+    setSelicLoading(true);
+    setMessage(null);
+    try {
+      const response = await fetch(`/api/monthly-snapshots/${snapshot.id}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ refreshSelic: true, notes: notes || null }),
+      });
+      if (!response.ok) throw new Error(await readApiError(response));
+      const updated = (await response.json()) as Pick<Snapshot, "selicAnnual" | "notes">;
+      setSnapshot({ ...snapshot, selicAnnual: updated.selicAnnual, notes: updated.notes });
+      setSelicAnnual(String(updated.selicAnnual));
+      setSelicStatus("Selic atualizada pelo Bacen e gravada no rascunho.");
+      setPreview(null);
+      await loadReview(periodMonth);
+      setMessage("Selic atualizada pelo Bacen. Recalcule a previa antes de fechar.");
+      await loadSnapshots();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Nao foi possivel atualizar a Selic pelo Bacen.");
+    } finally {
+      setSelicLoading(false);
       setLoading(false);
     }
   }
@@ -348,20 +409,14 @@ export function MonthlyCloseWizard({ defaultPeriod, defaultSelicAnnual, accounts
             Mes
             <Input value={periodMonth} onChange={(event) => setPeriodMonth(event.target.value)} type="month" className="mt-2 w-full" disabled={!!snapshot} />
           </label>
-          <label className="text-sm text-slate-300">
-            Selic anual
-            <Input
-              value={selicAnnual}
-              onChange={(event) => {
-                setSelicAnnual(event.target.value);
-                setPreview(null);
-              }}
-              type="number"
-              step="0.0001"
-              className="mt-2 w-full"
-              disabled={!!snapshot && !canEdit}
-            />
-          </label>
+          <div className="rounded-md border border-line bg-ink px-3 py-2">
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-sm font-medium text-slate-300">Selic anual Bacen</span>
+              {selicLoading ? <Loader2 className="h-4 w-4 animate-spin text-cyan" /> : null}
+            </div>
+            <div className="mt-1 text-2xl font-semibold text-white">{percent(Number(selicAnnual), 2)}</div>
+            <p className="mt-1 text-xs text-slate-500">{selicStatus}</p>
+          </div>
         </div>
         <label className="mt-3 block text-sm text-slate-300">
           Notas do fechamento
@@ -387,6 +442,17 @@ export function MonthlyCloseWizard({ defaultPeriod, defaultSelicAnnual, accounts
             >
               <Save className="h-4 w-4" />
               Salvar dados
+            </button>
+          ) : null}
+          {canEdit ? (
+            <button
+              type="button"
+              onClick={() => void refreshSnapshotSelic()}
+              disabled={loading}
+              className="focus-ring inline-flex items-center gap-2 rounded-md border border-line px-4 py-2 text-sm font-semibold text-slate-200 hover:border-cyan disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {selicLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RotateCcw className="h-4 w-4" />}
+              Atualizar Selic
             </button>
           ) : null}
           {snapshot ? (

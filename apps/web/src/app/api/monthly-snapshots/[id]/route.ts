@@ -3,10 +3,11 @@ import { getCurrentUserId, getRequiredHouseholdId } from "@/lib/authz";
 import { errorResponse, json } from "@/lib/api";
 import { prisma } from "@/lib/prisma";
 import { audit } from "@/server/audit";
-import { upsertManualSelicRate } from "@/server/interest-rates";
+import { resolveSelicAnnualForPeriod, upsertSelicRate } from "@/server/interest-rates";
 
 const patchSchema = z.object({
   selicAnnual: z.coerce.number().min(0).max(1).optional(),
+  refreshSelic: z.boolean().optional(),
   notes: z.string().max(2000).nullable().optional(),
 });
 
@@ -32,19 +33,27 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     const input = patchSchema.parse(await request.json());
     const current = await prisma.monthlySnapshot.findFirstOrThrow({ where: { id, householdId } });
     if (current.status !== "draft") return json({ error: "Snapshots fechados so podem ser alterados via revisao." }, { status: 409 });
+    const selic =
+      input.selicAnnual !== undefined || input.refreshSelic
+        ? await resolveSelicAnnualForPeriod(householdId, current.periodMonth, input.selicAnnual)
+        : null;
 
     const { updated, interestRateChange } = await prisma.$transaction(async (tx) => {
       const updated = await tx.monthlySnapshot.update({
         where: { id },
-        data: input,
+        data: {
+          notes: input.notes,
+          ...(selic ? { selicAnnual: selic.annualRate } : {}),
+        },
       });
       const interestRateChange =
-        input.selicAnnual === undefined
+        !selic
           ? null
-          : await upsertManualSelicRate(tx, {
+          : await upsertSelicRate(tx, {
               householdId,
               periodMonth: current.periodMonth,
-              annualRate: input.selicAnnual,
+              annualRate: selic.annualRate,
+              source: selic.source,
             });
 
       return { updated, interestRateChange };
