@@ -23,13 +23,12 @@ export function LoginForm() {
       setError(result.error === "CredentialsSignin" ? "Credenciais inválidas." : "Falha ao autenticar. Verifique se o banco local está ativo.");
       return;
     }
-    window.location.href = "/dashboard";
+    window.location.href = "/welcome";
   }
 
   return (
-    <form onSubmit={submit} className="w-full max-w-sm rounded-lg border border-line bg-ink/70 p-6 shadow-glow">
+    <form onSubmit={submit} className="w-full rounded-lg border border-line/80 bg-panel/70 p-6 text-left shadow-glow backdrop-blur">
       <h2 className="text-xl font-semibold text-white">Entrar</h2>
-      <p className="mt-2 text-sm text-slate-400">Acesse com seu e-mail e senha cadastrados.</p>
       <label className="mt-6 block text-sm font-medium text-slate-300">
         E-mail
         <input

@@ -118,7 +118,8 @@ async function login(page: Page) {
   await page.getByLabel("E-mail").fill(email);
   await page.getByLabel("Senha").fill(password);
   await page.getByRole("button", { name: "Entrar" }).click();
-  await expect(page).toHaveURL(/\/dashboard$/);
+  await expect(page.getByText("Bem-vindo, Bruno Savastano")).toBeVisible();
+  await expect(page).toHaveURL(/\/dashboard$/, { timeout: 10_000 });
 }
 
 async function createHouseholdFixture(householdId: string, userEmail: string, userPassword: string) {

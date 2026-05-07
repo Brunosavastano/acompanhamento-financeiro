@@ -68,3 +68,31 @@ textarea {
 .recharts-tooltip-item-separator {
   color: #e7eefc !important;
 }
+
+.welcome-in {
+  animation: welcome-in 680ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+.welcome-progress {
+  animation: welcome-progress 2200ms cubic-bezier(0.32, 0, 0.12, 1) both;
+}
+
+@keyframes welcome-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes welcome-progress {
+  from {
+    width: 0;
+  }
+  to {
+    width: 100%;
+  }
+}
