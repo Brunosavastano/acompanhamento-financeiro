@@ -13,14 +13,15 @@
 html,
 body {
   min-height: 100%;
-  background: #050914;
-  color: #e7eefc;
+  background: #070c18;
+  color: #c6cfdf;
 }
 
 body {
   margin: 0;
   font-family:
-    Inter,
+    var(--font-plex),
+    "IBM Plex Sans",
     ui-sans-serif,
     system-ui,
     -apple-system,
@@ -42,22 +43,22 @@ textarea {
 }
 
 ::-webkit-scrollbar-track {
-  background: #07101f;
+  background: #0a101f;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #263756;
+  background: #22304c;
   border-radius: 999px;
 }
 
 .focus-ring {
-  @apply focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan;
+  @apply focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gold;
 }
 
 .recharts-default-tooltip {
-  background-color: #0b1220 !important;
-  border: 1px solid #22314b !important;
-  color: #e7eefc !important;
+  background-color: #0b1120 !important;
+  border: 1px solid #1f2a42 !important;
+  color: #eef2fa !important;
 }
 
 .recharts-tooltip-wrapper,
@@ -66,7 +67,7 @@ textarea {
 .recharts-tooltip-item-name,
 .recharts-tooltip-item-value,
 .recharts-tooltip-item-separator {
-  color: #e7eefc !important;
+  color: #eef2fa !important;
 }
 
 .welcome-in {

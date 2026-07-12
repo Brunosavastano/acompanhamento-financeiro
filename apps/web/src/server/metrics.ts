@@ -53,7 +53,9 @@ export async function getDashboardData(householdId: string, periodMonth?: string
     getSnapshotHistory(householdId),
     prisma.person.findMany({ where: { householdId }, orderBy: { name: "asc" } }),
   ]);
-  const goals = await getGoalCards(householdId, snapshot.periodMonth, metricValuesForGoals(metrics));
+  const goalRows = await getGoalRowsForMetrics(householdId, snapshot.periodMonth, metricValuesForGoals(metrics));
+  const goals = [...goalRows].sort((a, b) => b.progressPct - a.progressPct).slice(0, 3);
+  const reserveGoal = goalRows.find((goal) => goal.metricKey === "meses_de_reserva");
 
   return {
     hasData: true as const,
@@ -80,7 +82,51 @@ export async function getDashboardData(householdId: string, periodMonth?: string
     })),
     closestGoals: goals,
     people: people.map((person) => ({ id: person.id, name: person.name, role: person.role })),
+    composition: buildCompositionScopes(metrics.snapshot.positions, people, metrics.debt),
+    reserveTargetMonths: reserveGoal ? parseNumericGoalValue(reserveGoal.targetValue) : null,
   };
+}
+
+type CompositionBucket = { investments: number; cash: number; benefits: number };
+
+export type CompositionScope = CompositionBucket & {
+  id: string;
+  label: string;
+  total: number;
+  debtPvTotal: number;
+};
+
+function buildCompositionScopes(
+  positions: { personId: string; category: string; amount: Prisma.Decimal }[],
+  people: { id: string; name: string }[],
+  debt: { presentValueTotal: number; byPerson: Record<string, { presentValueTotal: number }> },
+): CompositionScope[] {
+  const emptyBucket = (): CompositionBucket => ({ investments: 0, cash: 0, benefits: 0 });
+  const household = emptyBucket();
+  const perPerson = new Map(people.map((person) => [person.id, emptyBucket()]));
+
+  for (const position of positions) {
+    const amount = toDecimalNumber(position.amount);
+    const key = position.category === "investment" ? "investments" : position.category === "cash" ? "cash" : "benefits";
+    household[key] += amount;
+    const personBucket = perPerson.get(position.personId);
+    if (personBucket) personBucket[key] += amount;
+  }
+
+  const toScope = (id: string, label: string, bucket: CompositionBucket, debtPvTotal: number): CompositionScope => ({
+    id,
+    label,
+    ...bucket,
+    total: bucket.investments + bucket.cash + bucket.benefits,
+    debtPvTotal,
+  });
+
+  return [
+    toScope("familia", "Família", household, debt.presentValueTotal),
+    ...people.map((person) =>
+      toScope(person.id, person.name, perPerson.get(person.id) ?? emptyBucket(), debt.byPerson[person.id]?.presentValueTotal ?? 0),
+    ),
+  ];
 }
 
 export async function calculateSnapshotMetrics(householdId: string, snapshotId: string) {

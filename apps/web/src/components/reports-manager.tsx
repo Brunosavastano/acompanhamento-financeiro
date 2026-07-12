@@ -1,8 +1,9 @@
 "use client";
 
-import { useMemo, useRef, useState, type ReactNode } from "react";
-import { AlertCircle, CheckCircle2, Download, FileSpreadsheet, History, RefreshCw, Upload } from "lucide-react";
-import { Button, Input, Panel } from "@/components/ui";
+import { useMemo, useRef, useState, type DragEvent, type ReactNode } from "react";
+import { AlertCircle, Download, FileSpreadsheet, Loader2, RefreshCw, UploadCloud } from "lucide-react";
+import { clsx } from "clsx";
+import { Input } from "@/components/ui";
 
 type Job = {
   id: string;
@@ -51,6 +52,69 @@ const csvBackups = [
   { key: "auditLogs", label: "Auditoria" },
 ] as const;
 
+const jobStatusLabels: Record<string, string> = {
+  pending: "pendente",
+  running: "executando",
+  completed: "sucesso",
+  failed: "falhou",
+};
+
+const actionLabels: Record<string, string> = {
+  create: "criou",
+  update: "atualizou",
+  delete: "removeu",
+  revise: "revisou",
+  close: "fechou",
+  import: "importou",
+};
+
+const entityLabels: Record<string, string> = {
+  household: "os dados da família",
+  person: "uma pessoa",
+  account: "uma conta",
+  monthly_snapshot: "um fechamento mensal",
+  position: "uma posição de saldo",
+  debt_cashflow: "um lançamento do cartão",
+  budget_item: "um item do orçamento",
+  goal: "uma meta",
+  goal_progress_snapshot: "o progresso de uma meta",
+  interest_rate: "a taxa Selic",
+  import_job: "a planilha base",
+};
+
+const actionDots: Record<string, string> = {
+  create: "bg-positive",
+  close: "bg-positive",
+  delete: "bg-negative",
+  import: "bg-gold",
+  revise: "bg-gold",
+  update: "bg-info",
+};
+
+function describeLog(log: AuditLog) {
+  const action = actionLabels[log.action] ?? log.action;
+  const entity = entityLabels[log.entityType] ?? log.entityType;
+  return `${action} ${entity}`;
+}
+
+function formatWhen(iso: string) {
+  const date = new Date(iso);
+  const day = new Intl.DateTimeFormat("pt-BR", { day: "numeric", month: "short" }).format(date).replace(".", "");
+  const time = new Intl.DateTimeFormat("pt-BR", { hour: "2-digit", minute: "2-digit" }).format(date);
+  return `${day}, ${time}`;
+}
+
+function formatDateTime(iso: string) {
+  const date = new Date(iso);
+  return `${date.toLocaleDateString("pt-BR")} às ${new Intl.DateTimeFormat("pt-BR", { hour: "2-digit", minute: "2-digit" }).format(date)}`;
+}
+
+function shortMonthYear(period: string) {
+  const date = new Date(period.slice(0, 10));
+  const month = new Intl.DateTimeFormat("pt-BR", { month: "short", timeZone: "UTC" }).format(date).replace(".", "");
+  return `${month}/${String(date.getUTCFullYear()).slice(2)}`;
+}
+
 export function ReportsManager({
   defaultPath,
   initialAuditLogs,
@@ -69,42 +133,47 @@ export function ReportsManager({
   const [rows, setRows] = useState<ReconciliationRow[]>(initialRows);
   const [selectedJobId, setSelectedJobId] = useState<string | null>(initialSelectedJobId);
   const [rowFilter, setRowFilter] = useState<RowFilter>("all");
+  const [showAllRows, setShowAllRows] = useState(false);
+  const [showCsvOptions, setShowCsvOptions] = useState(false);
   const [auditLogs, setAuditLogs] = useState(initialAuditLogs);
   const [loading, setLoading] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const passedRows = rows.filter((row) => row.passed).length;
-  const failedRows = rows.length - passedRows;
+  const failedRows = rows.filter((row) => !row.passed);
   const selectedJob = jobs.find((job) => job.id === selectedJobId) ?? null;
   const visibleRows = useMemo(() => {
     if (rowFilter === "failed") return rows.filter((row) => !row.passed);
     if (rowFilter === "passed") return rows.filter((row) => row.passed);
     return rows;
   }, [rowFilter, rows]);
-  const reconciliationStats = useMemo(() => {
-    const periods = new Set(rows.map((row) => row.periodMonth.slice(0, 7)));
-    const maxDelta = rows.reduce((largest, row) => Math.max(largest, Math.abs(Number(row.delta))), 0);
-    return { periods: periods.size, maxDelta };
-  }, [rows]);
+
+  async function importFile(file: File) {
+    if (!/\.(xlsx|xls)$/i.test(file.name)) {
+      setMessage("Escolha um arquivo .xlsx.");
+      return;
+    }
+    const confirmed = window.confirm(
+      `Importar "${file.name}"? A importação substitui a linha de base da planilha e recalcula os indicadores. Os fechamentos feitos no app não são alterados.`,
+    );
+    if (!confirmed) return;
+    const formData = new FormData();
+    formData.append("file", file);
+    await importExcel({ method: "POST", body: formData });
+  }
 
   async function importByPath() {
+    const confirmed = window.confirm(
+      "Importar a planilha do caminho do servidor? A importação substitui a linha de base e recalcula os indicadores.",
+    );
+    if (!confirmed) return;
     await importExcel({
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ filePath }),
     });
-  }
-
-  async function importUpload() {
-    const file = fileInputRef.current?.files?.[0];
-    if (!file) {
-      setMessage("Selecione um arquivo .xlsx.");
-      return;
-    }
-    const formData = new FormData();
-    formData.append("file", file);
-    await importExcel({ method: "POST", body: formData });
   }
 
   async function importExcel(init: RequestInit) {
@@ -130,6 +199,7 @@ export function ReportsManager({
       setMessage(`Importação concluída: ${job.rows} reconciliações geradas.`);
     } finally {
       setLoading(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
     }
   }
 
@@ -147,206 +217,291 @@ export function ReportsManager({
     setAuditLogs(Array.isArray(payload) ? payload : []);
   }
 
+  function onDrop(event: DragEvent<HTMLElement>) {
+    event.preventDefault();
+    setIsDragging(false);
+    const file = event.dataTransfer.files?.[0];
+    if (file) void importFile(file);
+  }
+
   return (
-    <div className="space-y-4">
-      <div className="grid gap-4 xl:grid-cols-[0.8fr_1.2fr]">
-        <Panel>
-        <h2 className="text-base font-semibold text-white">Importar planilha</h2>
-        <p className="mt-2 text-sm text-slate-400">A importação substitui a linha de base importada e recalcula os indicadores no app.</p>
-        <div className="mt-4 space-y-3">
-          <label className="block text-sm text-slate-300">
-            Caminho local
-            <Input value={filePath} onChange={(event) => setFilePath(event.target.value)} className="mt-2 w-full" />
-          </label>
-          <div className="flex flex-wrap gap-2">
-            <Button onClick={importByPath} disabled={loading}>
-              <Upload className="h-4 w-4" />
-              {loading ? "Importando..." : "Importar por caminho"}
-            </Button>
-            <a href="/api/backup/export" className="focus-ring inline-flex items-center gap-2 rounded-md border border-line px-4 py-2 text-sm font-semibold text-slate-200 hover:border-cyan">
-              <Download className="h-4 w-4" />
-              Exportar backup
+    <div className="grid items-start gap-4 lg:grid-cols-2">
+      <div className="flex min-w-0 flex-col gap-4">
+        <section className="rounded-[14px] border border-edge bg-surface p-6">
+          <h2 className="font-display text-lg font-normal text-snow">Importar planilha</h2>
+          <p className="mt-2 text-xs leading-[18px] text-muted">
+            A importação substitui a linha de base e recalcula todos os indicadores. Os fechamentos feitos no app não são alterados.
+          </p>
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            onDragOver={(event) => {
+              event.preventDefault();
+              setIsDragging(true);
+            }}
+            onDragLeave={() => setIsDragging(false)}
+            onDrop={onDrop}
+            disabled={loading}
+            className={clsx(
+              "focus-ring mt-4 grid w-full place-items-center rounded-xl border-[1.5px] border-dashed bg-surface-2 p-7 text-center",
+              isDragging ? "border-gold" : "border-edge hover:border-gold",
+              loading && "opacity-60",
+            )}
+          >
+            {loading ? (
+              <Loader2 className="h-[26px] w-[26px] animate-spin text-gold" aria-hidden />
+            ) : (
+              <UploadCloud className="h-[26px] w-[26px] text-gold" strokeWidth={1.8} aria-hidden />
+            )}
+            <span className="mt-2.5 block text-[13px] font-semibold text-snow">
+              {loading ? "Importando…" : "Arraste o arquivo .xlsx aqui"}
+            </span>
+            <span className="mt-1 block text-xs text-faint">ou clique para escolher no computador</span>
+          </button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".xlsx,.xls"
+            className="hidden"
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              if (file) void importFile(file);
+            }}
+          />
+          {message ? (
+            <p role="status" className="mt-3 rounded-[10px] border border-edge bg-surface-2 px-3.5 py-2.5 text-xs text-body">
+              {message}
+            </p>
+          ) : null}
+
+          {jobs.length > 0 ? (
+            <div className="mt-3.5 flex flex-col gap-2">
+              {jobs.map((job, index) => (
+                <button
+                  key={job.id}
+                  type="button"
+                  onClick={() => void loadReconciliation(job.id)}
+                  className={clsx(
+                    "focus-ring flex w-full items-center gap-2.5 rounded-[10px] border px-3.5 py-3 text-left",
+                    selectedJobId === job.id ? "border-gold/50 bg-surface-2" : "border-edge-soft bg-surface-2 opacity-70 hover:opacity-100",
+                  )}
+                >
+                  <FileSpreadsheet
+                    className={clsx("h-4 w-4 shrink-0", job.status === "failed" ? "text-negative-text" : selectedJobId === job.id ? "text-positive-text" : "text-faint")}
+                    aria-hidden
+                  />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-xs font-semibold text-snow">{job.fileName}</span>
+                    <span className="block text-[11px] text-faint">
+                      {formatDateTime(job.createdAt)} · {job.rows} reconciliações · {jobStatusLabels[job.status] ?? job.status}
+                    </span>
+                    {job.errorMessage ? <span className="block text-[11px] text-negative-text">{job.errorMessage}</span> : null}
+                  </span>
+                  {index === 0 ? (
+                    <span className="shrink-0 rounded-full bg-positive/[0.12] px-2.5 py-0.5 text-[10px] font-semibold text-positive-text">Atual</span>
+                  ) : null}
+                </button>
+              ))}
+            </div>
+          ) : null}
+
+          {defaultPath ? (
+            <div className="mt-4 border-t border-edge-soft pt-3.5">
+              <label className="block text-[11px] font-semibold text-faint">
+                Caminho no servidor (uso local)
+                <div className="mt-1.5 flex gap-2">
+                  <Input value={filePath} onChange={(event) => setFilePath(event.target.value)} className="w-full bg-surface-2 text-xs" />
+                  <button
+                    type="button"
+                    onClick={() => void importByPath()}
+                    disabled={loading || !filePath}
+                    className="focus-ring shrink-0 rounded-lg border border-edge px-3 py-2 text-xs font-semibold text-body hover:border-gold hover:text-snow disabled:opacity-50"
+                  >
+                    Importar
+                  </button>
+                </div>
+              </label>
+            </div>
+          ) : null}
+        </section>
+
+        <section className="rounded-[14px] border border-edge bg-surface p-6">
+          <h2 className="font-display text-lg font-normal text-snow">Backup e exportação</h2>
+          <div className="mt-4 flex gap-2.5">
+            <a
+              href="/api/backup/export"
+              className="focus-ring inline-flex flex-1 items-center justify-center gap-2 rounded-[10px] bg-gold px-3 py-[11px] text-[13px] font-bold text-sidebar hover:bg-gold-light"
+            >
+              <Download className="h-[15px] w-[15px]" aria-hidden />
+              Backup completo (JSON)
             </a>
+            <button
+              type="button"
+              onClick={() => setShowCsvOptions((current) => !current)}
+              className="focus-ring flex-1 rounded-[10px] border border-edge bg-surface-2 px-3 py-[11px] text-[13px] font-semibold text-body hover:border-gold hover:text-snow"
+            >
+              Exportar CSV…
+            </button>
           </div>
-          <div className="rounded-md border border-line bg-ink p-3">
-            <div className="text-sm font-medium text-white">Exportar CSV</div>
+          {showCsvOptions ? (
             <div className="mt-3 flex flex-wrap gap-2">
               {csvBackups.map((dataset) => (
                 <a
                   key={dataset.key}
                   href={`/api/backup/export?format=csv&dataset=${dataset.key}`}
-                  className="focus-ring inline-flex items-center gap-2 rounded-md border border-line px-3 py-2 text-xs font-semibold text-slate-200 hover:border-cyan"
+                  className="focus-ring inline-flex items-center gap-1.5 rounded-full border border-edge px-3 py-1.5 text-[11px] font-semibold text-body hover:border-gold hover:text-gold-light"
                 >
-                  <Download className="h-3.5 w-3.5" />
+                  <Download className="h-3 w-3" aria-hidden />
                   {dataset.label}
                 </a>
               ))}
             </div>
-          </div>
-          <div className="rounded-md border border-line bg-ink p-3">
-            <label className="block text-sm text-slate-300">
-              Upload .xlsx
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept=".xlsx,.xls"
-                className="mt-2 block w-full text-sm text-slate-400 file:mr-3 file:rounded-md file:border-0 file:bg-panel2 file:px-3 file:py-2 file:text-sm file:font-medium file:text-slate-100"
-              />
-            </label>
-            <Button onClick={importUpload} disabled={loading} className="mt-3 border border-line bg-panel2 text-white">
-              <Upload className="h-4 w-4" />
-              Importar upload
-            </Button>
-          </div>
-          {message ? (
-            <p className="rounded-md border border-line bg-ink p-3 text-sm text-slate-300">
-              {message}
+          ) : (
+            <p className="mt-3 text-[11px] leading-[17px] text-faint">
+              O CSV pode ser exportado por conjunto: pessoas, contas, snapshots, posições, dívidas, orçamento, metas, taxas e auditoria.
             </p>
-          ) : null}
-        </div>
-        <div className="mt-6 space-y-2">
-          {jobs.map((job) => (
-            <button
-              key={job.id}
-              onClick={() => loadReconciliation(job.id)}
-              className={
-                selectedJobId === job.id
-                  ? "focus-ring w-full rounded-md border border-cyan bg-ink p-3 text-left"
-                  : "focus-ring w-full rounded-md border border-line bg-ink p-3 text-left hover:border-cyan"
-              }
-            >
-              <div className="flex items-center gap-2 text-sm font-medium text-white">
-                <FileSpreadsheet className="h-4 w-4 text-green" />
-                {job.fileName}
-              </div>
-              <div className="mt-1 text-xs text-slate-400">
-                {job.status} - {job.rows} linhas - {new Date(job.createdAt).toLocaleString("pt-BR")}
-              </div>
-              {job.errorMessage ? <div className="mt-1 text-xs text-magenta">{job.errorMessage}</div> : null}
-            </button>
-          ))}
-        </div>
-        </Panel>
-        <Panel>
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <h2 className="text-base font-semibold text-white">Reconciliação</h2>
-            <p className="mt-1 text-sm text-slate-400">
-              {selectedJob ? `${selectedJob.fileName} - ${new Date(selectedJob.createdAt).toLocaleString("pt-BR")}` : "Comparação entre KPIs da planilha e métricas recalculadas pelo app."}
-            </p>
-          </div>
-          {rows.length ? (
-            <div className="flex gap-2 text-xs">
-              <span className="inline-flex items-center gap-1 rounded-md border border-line px-2 py-1 text-green">
-                <CheckCircle2 className="h-3.5 w-3.5" />
-                {passedRows} OK
-              </span>
-              <span className="inline-flex items-center gap-1 rounded-md border border-line px-2 py-1 text-magenta">
-                <AlertCircle className="h-3.5 w-3.5" />
-                {failedRows} falhas
-              </span>
-            </div>
-          ) : null}
-        </div>
-        {rows.length ? (
-          <>
-            <div className="mt-4 grid gap-3 sm:grid-cols-4">
-              <SummaryTile label="Linhas" value={String(rows.length)} />
-              <SummaryTile label="Meses" value={String(reconciliationStats.periods)} />
-              <SummaryTile label="Falhas" value={String(failedRows)} tone={failedRows ? "text-magenta" : "text-green"} />
-              <SummaryTile label="Maior delta" value={reconciliationStats.maxDelta.toFixed(6)} />
-            </div>
-            <div className="mt-4 flex flex-wrap gap-2">
-              <FilterButton active={rowFilter === "all"} onClick={() => setRowFilter("all")}>
-                Todas
-              </FilterButton>
-              <FilterButton active={rowFilter === "failed"} onClick={() => setRowFilter("failed")}>
-                Falhas
-              </FilterButton>
-              <FilterButton active={rowFilter === "passed"} onClick={() => setRowFilter("passed")}>
-                OK
-              </FilterButton>
-            </div>
-          </>
-        ) : null}
-        <div className="mt-4 overflow-x-auto">
-          <table className="min-w-full text-sm">
-            <thead className="text-left text-xs uppercase tracking-[0.12em] text-slate-500">
-              <tr>
-                <th className="py-2">Mês</th>
-                <th>Métrica</th>
-                <th>Planilha</th>
-                <th>App</th>
-                <th>Delta</th>
-                <th>Status</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-line">
-              {visibleRows.map((row) => (
-                <tr key={row.id}>
-                  <td className="py-2 text-slate-300">{row.periodMonth.slice(0, 7)}</td>
-                  <td className="text-slate-400">{row.metricKey}</td>
-                  <td className="text-slate-400">{Number(row.spreadsheetValue).toFixed(4)}</td>
-                  <td className="text-slate-400">{Number(row.appValue).toFixed(4)}</td>
-                  <td className={row.passed ? "text-green" : "text-magenta"}>{Number(row.delta).toFixed(6)}</td>
-                  <td>{row.passed ? "OK" : "Falhou"}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          {rows.length === 0 ? <p className="py-6 text-center text-sm text-slate-500">Nenhuma reconciliação carregada.</p> : null}
-          {rows.length > 0 && visibleRows.length === 0 ? <p className="py-6 text-center text-sm text-slate-500">Nenhuma linha neste filtro.</p> : null}
-        </div>
-        </Panel>
+          )}
+        </section>
       </div>
-      <Panel>
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <h2 className="flex items-center gap-2 text-base font-semibold text-white">
-              <History className="h-4 w-4 text-cyan" />
-              Auditoria recente
-            </h2>
-            <p className="mt-1 text-sm text-slate-400">Alterações críticas registradas para backup, rastreabilidade e revisão.</p>
-          </div>
-          <button type="button" onClick={() => void loadAuditLogs()} className="focus-ring rounded-md border border-line p-2 text-slate-300" aria-label="Atualizar auditoria">
-            <RefreshCw className="h-4 w-4" />
-          </button>
-        </div>
-        <div className="mt-4 overflow-x-auto">
-          <table className="min-w-full text-sm">
-            <thead className="text-left text-xs uppercase tracking-[0.12em] text-slate-500">
-              <tr>
-                <th className="py-2">Data</th>
-                <th>Ação</th>
-                <th>Entidade</th>
-                <th>Usuário</th>
-                <th>Motivo</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-line">
-              {auditLogs.map((log) => (
-                <tr key={log.id}>
-                  <td className="py-2 text-slate-300">{new Date(log.createdAt).toLocaleString("pt-BR")}</td>
-                  <td className="text-slate-400">{log.action}</td>
-                  <td className="font-mono text-xs text-slate-400">{log.entityType}:{log.entityId.slice(0, 8)}</td>
-                  <td className="text-slate-400">{log.user?.name ?? log.user?.email ?? "Sistema"}</td>
-                  <td className="text-slate-500">{log.reason ?? "-"}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          {auditLogs.length === 0 ? <p className="py-6 text-center text-sm text-slate-500">Nenhum registro de auditoria encontrado.</p> : null}
-        </div>
-      </Panel>
-    </div>
-  );
-}
 
-function SummaryTile({ label, value, tone = "text-white" }: { label: string; value: string; tone?: string }) {
-  return (
-    <div className="rounded-md border border-line bg-ink p-3">
-      <div className="text-xs uppercase tracking-[0.14em] text-slate-500">{label}</div>
-      <div className={`mt-2 text-lg font-semibold ${tone}`}>{value}</div>
+      <div className="flex min-w-0 flex-col gap-4">
+        <section className="rounded-[14px] border border-edge bg-surface p-6">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h2 className="font-display text-lg font-normal text-snow">Reconciliação</h2>
+              <p className="mt-1.5 text-xs text-muted">
+                {selectedJob ? `${selectedJob.fileName} · ${formatDateTime(selectedJob.createdAt)}` : "Planilha × valores recalculados pelo app"}
+              </p>
+            </div>
+            {rows.length > 0 ? (
+              <span
+                className={clsx(
+                  "rounded-full px-3 py-1 text-[11px] font-semibold",
+                  failedRows.length === 0 ? "bg-positive/[0.12] text-positive-text" : "bg-negative/[0.12] text-negative-text",
+                )}
+              >
+                {passedRows} de {rows.length} conferem
+              </span>
+            ) : null}
+          </div>
+
+          {rows.length > 0 ? (
+            <>
+              <div className="mt-4 flex h-2.5 overflow-hidden rounded-full bg-elevated">
+                <span className="bg-positive" style={{ width: `${(passedRows / rows.length) * 100}%` }} />
+                <span className="bg-negative" style={{ width: `${(failedRows.length / rows.length) * 100}%` }} />
+              </div>
+
+              {failedRows.length > 0 ? (
+                <div className="mt-4 flex flex-col gap-2">
+                  {failedRows.slice(0, 6).map((row) => (
+                    <div key={row.id} className="flex items-center gap-2.5 rounded-[10px] border border-negative/35 bg-negative/[0.06] px-3.5 py-3">
+                      <AlertCircle className="h-[15px] w-[15px] shrink-0 text-negative-text" aria-hidden />
+                      <div className="min-w-0 flex-1">
+                        <div className="text-xs font-semibold text-snow">
+                          {row.metricKey} · {shortMonthYear(row.periodMonth)}
+                        </div>
+                        <div className="text-[11px] tabular-nums text-muted">
+                          planilha {Number(row.spreadsheetValue).toFixed(4)} × app {Number(row.appValue).toFixed(4)} · delta{" "}
+                          {Number(row.delta).toFixed(6)}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                  {failedRows.length > 6 ? (
+                    <p className="text-[11px] text-faint">…e mais {failedRows.length - 6} divergências na tabela completa.</p>
+                  ) : null}
+                </div>
+              ) : (
+                <p className="mt-4 text-xs text-positive-text">Todas as linhas conferem com a planilha original.</p>
+              )}
+
+              <button
+                type="button"
+                onClick={() => setShowAllRows((current) => !current)}
+                className="focus-ring mt-3.5 w-full rounded-[10px] border border-edge py-2.5 text-xs font-semibold text-muted hover:border-muted hover:text-snow"
+              >
+                {showAllRows ? "Ocultar a tabela de reconciliação" : `Ver as ${rows.length} linhas da reconciliação`}
+              </button>
+
+              {showAllRows ? (
+                <>
+                  <div className="mt-3.5 flex flex-wrap gap-2">
+                    <FilterButton active={rowFilter === "all"} onClick={() => setRowFilter("all")}>
+                      Todas
+                    </FilterButton>
+                    <FilterButton active={rowFilter === "failed"} onClick={() => setRowFilter("failed")}>
+                      Falhas
+                    </FilterButton>
+                    <FilterButton active={rowFilter === "passed"} onClick={() => setRowFilter("passed")}>
+                      OK
+                    </FilterButton>
+                  </div>
+                  <div className="mt-3 max-h-[420px] overflow-auto rounded-[10px] border border-edge-soft">
+                    <table className="min-w-full text-[13px]">
+                      <thead className="sticky top-0 bg-surface-2 text-left text-[10px] uppercase tracking-[0.12em] text-faint">
+                        <tr>
+                          <th className="px-3 py-2.5 font-semibold">Mês</th>
+                          <th className="px-3 py-2.5 font-semibold">Métrica</th>
+                          <th className="px-3 py-2.5 text-right font-semibold">Planilha</th>
+                          <th className="px-3 py-2.5 text-right font-semibold">App</th>
+                          <th className="px-3 py-2.5 text-right font-semibold">Delta</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-edge-hair">
+                        {visibleRows.map((row) => (
+                          <tr key={row.id} className={row.passed ? undefined : "bg-negative/[0.05]"}>
+                            <td className="px-3 py-2 tabular-nums text-body">{shortMonthYear(row.periodMonth)}</td>
+                            <td className="px-3 py-2 text-muted">{row.metricKey}</td>
+                            <td className="px-3 py-2 text-right tabular-nums text-muted">{Number(row.spreadsheetValue).toFixed(4)}</td>
+                            <td className="px-3 py-2 text-right tabular-nums text-muted">{Number(row.appValue).toFixed(4)}</td>
+                            <td className={clsx("px-3 py-2 text-right tabular-nums", row.passed ? "text-positive-text" : "text-negative-text")}>
+                              {Number(row.delta).toFixed(6)}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    {visibleRows.length === 0 ? <p className="p-4 text-center text-xs text-faint">Nenhuma linha neste filtro.</p> : null}
+                  </div>
+                </>
+              ) : null}
+            </>
+          ) : (
+            <p className="mt-4 text-sm text-muted">Nenhuma reconciliação carregada. Importe a planilha para gerar a comparação.</p>
+          )}
+        </section>
+
+        <section className="rounded-[14px] border border-edge bg-surface p-6">
+          <div className="flex items-start justify-between gap-3">
+            <h2 className="font-display text-lg font-normal text-snow">Atividade recente</h2>
+            <button
+              type="button"
+              onClick={() => void loadAuditLogs()}
+              className="focus-ring rounded-lg p-1.5 text-faint hover:bg-elevated hover:text-snow"
+              aria-label="Atualizar atividade"
+            >
+              <RefreshCw className="h-4 w-4" aria-hidden />
+            </button>
+          </div>
+          <div className="mt-4 flex flex-col">
+            {auditLogs.slice(0, 12).map((log) => (
+              <div key={log.id} className="relative ml-1.5 border-l-2 border-edge-soft pb-[18px] pl-[22px] last:pb-0">
+                <span
+                  className={clsx("absolute -left-[5px] top-1 h-2 w-2 rounded-full", actionDots[log.action] ?? "bg-info")}
+                  aria-hidden
+                />
+                <div className="text-xs text-body">
+                  <strong className="font-semibold text-snow">{log.user?.name ?? log.user?.email ?? "Sistema"}</strong> {describeLog(log)}
+                  {log.reason ? <span className="text-faint"> — {log.reason}</span> : null}
+                </div>
+                <div className="mt-0.5 text-[11px] text-faint">{formatWhen(log.createdAt)}</div>
+              </div>
+            ))}
+            {auditLogs.length === 0 ? <p className="text-sm text-muted">Nenhum registro de auditoria ainda.</p> : null}
+          </div>
+        </section>
+      </div>
     </div>
   );
 }
@@ -356,11 +511,10 @@ function FilterButton({ active, children, onClick }: { active: boolean; children
     <button
       type="button"
       onClick={onClick}
-      className={
-        active
-          ? "focus-ring rounded-md border border-cyan bg-cyan/10 px-3 py-2 text-xs font-semibold text-white"
-          : "focus-ring rounded-md border border-line px-3 py-2 text-xs font-semibold text-slate-300 hover:border-cyan"
-      }
+      className={clsx(
+        "focus-ring rounded-lg px-3 py-1.5 text-xs font-semibold",
+        active ? "bg-elevated text-snow" : "text-muted hover:text-snow",
+      )}
     >
       {children}
     </button>
