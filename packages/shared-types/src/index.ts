@@ -18,6 +18,9 @@ export const updatePositionSchema = z.object({
   accountId: z.string().min(1).optional().nullable(),
   category: z.enum(["cash", "benefit", "investment", "cashback"]),
   amount: moneySchema,
+  // Proveniência: saldos sugeridos pelo leitor de prints são gravados como
+  // "ai_extracted" (auditáveis/reversíveis); digitação manual continua "manual".
+  source: z.enum(["manual", "ai_extracted"]).optional(),
 });
 
 export const debtCashflowSchema = z
@@ -72,6 +75,66 @@ export const accountSchema = z.object({
 export const importExcelSchema = z.object({
   filePath: z.string().min(1).optional(),
 });
+
+// --- IA: leitor de prints ---------------------------------------------------
+
+// Saída ESTRUTURADA que o modelo de visão deve produzir (generateObject).
+// O modelo devolve `candidateIndex` (1..N no inventário montado no servidor),
+// nunca um id de conta — e `amountRaw` é a string vista no print, normalizada
+// depois pelo servidor (nunca pelo modelo).
+export const statementReadSchema = z.object({
+  reads: z.array(
+    z.object({
+      candidateIndex: z.number().int().min(1).nullable(),
+      detectedInstitution: z.string().max(80),
+      detectedHolder: z.string().max(80).nullable(),
+      suggestedCategory: z.enum(["cash", "benefit", "investment", "cashback", "other"]),
+      amountRaw: z.string().max(32),
+      confidence: z.number().min(0).max(1),
+      note: z.string().max(160).nullable(),
+    }),
+  ),
+  warnings: z.array(z.string().max(160)),
+});
+export type StatementReadModelOutput = z.infer<typeof statementReadSchema>;
+
+export type StatementReadFlag =
+  | "unparseable"
+  | "ambiguous_magnitude"
+  | "large_delta"
+  | "no_match"
+  | "low_confidence"
+  | "collision";
+
+// Resposta que a rota devolve ao cliente (já normalizada e conferida no servidor).
+export type StatementReadResultRow = {
+  candidateIndex: number | null;
+  positionId: string | null;
+  accountLabel: string;
+  detectedInstitution: string;
+  amount: string | null; // decimal com ponto ("1234.56"), ou null se não parseável
+  previousAmount: string | null;
+  deltaFactor: number | null;
+  flags: StatementReadFlag[];
+  confidence: number;
+  note: string | null;
+};
+export type StatementReadResult = {
+  reads: StatementReadResultRow[];
+  warnings: string[];
+  notFilled: Array<{ positionId: string; accountLabel: string }>;
+};
+
+// --- IA: bot de dúvidas -----------------------------------------------------
+
+export const assistantMessageSchema = z.object({
+  role: z.enum(["user", "assistant"]),
+  content: z.string().min(1).max(4000),
+});
+export const assistantChatSchema = z.object({
+  messages: z.array(assistantMessageSchema).min(1).max(20),
+});
+export type AssistantChatInput = z.infer<typeof assistantChatSchema>;
 
 export type CreateSnapshotInput = z.infer<typeof createSnapshotSchema>;
 export type DebtCashflowInput = z.infer<typeof debtCashflowSchema>;
