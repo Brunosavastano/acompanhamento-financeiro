@@ -1,37 +1,45 @@
 import { PageHeader } from "@/components/page-header";
+import { PageBody } from "@/components/ui";
 import { GoalManager } from "@/components/goal-manager";
+import { MonthPager } from "@/components/month-pager";
 import { getRequiredPageHouseholdId } from "@/lib/authz";
 import { prisma } from "@/lib/prisma";
 import { formatPeriod } from "@/lib/date";
 import { getGoalRows } from "@/server/metrics";
 
-export default async function MetasPage() {
+export default async function MetasPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ period_month?: string }>;
+}) {
   const householdId = await getRequiredPageHouseholdId();
-  const [snapshots, latestSnapshot] = await Promise.all([
-    prisma.monthlySnapshot.findMany({
-      where: { householdId },
-      orderBy: [{ periodMonth: "asc" }, { revisionNumber: "desc" }],
-      select: { periodMonth: true, status: true },
-    }),
-    prisma.monthlySnapshot.findFirst({
-      where: { householdId },
-      orderBy: [{ periodMonth: "desc" }, { revisionNumber: "desc" }],
-    }),
-  ]);
-  const defaultPeriod = formatPeriod(latestSnapshot?.periodMonth ?? new Date());
-  const goals = await getGoalRows(householdId, defaultPeriod);
+  const params = await searchParams;
+  const snapshots = await prisma.monthlySnapshot.findMany({
+    where: { householdId },
+    orderBy: { periodMonth: "asc" },
+    select: { periodMonth: true },
+  });
+
+  const periods = [...new Set(snapshots.map((snapshot) => formatPeriod(snapshot.periodMonth)))];
+  const latest = periods.at(-1);
+  const period = params.period_month ?? latest?.slice(0, 7) ?? new Date().toISOString().slice(0, 7);
+  const current = `${period}-01`;
+  if (!periods.includes(current)) {
+    periods.push(current);
+    periods.sort();
+  }
+
+  const goals = await getGoalRows(householdId, current);
 
   return (
     <>
-      <PageHeader title="Metas" description="Metas quantitativas, metas inversas e progresso qualitativo manual." />
-      <GoalManager
-        availablePeriods={snapshots.map((snapshot) => ({
-          periodMonth: formatPeriod(snapshot.periodMonth),
-          status: snapshot.status,
-        }))}
-        defaultPeriod={defaultPeriod.slice(0, 7)}
-        initialGoals={goals}
+      <PageHeader
+        title="Metas da família"
+        actions={<MonthPager current={current} periods={periods} basePath="/metas" prefix="Referência:" />}
       />
+      <PageBody>
+        <GoalManager key={period} period={period} initialGoals={goals} />
+      </PageBody>
     </>
   );
 }

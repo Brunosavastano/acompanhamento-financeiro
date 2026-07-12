@@ -1,8 +1,10 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Eye, RefreshCw } from "lucide-react";
-import { Button, Panel } from "@/components/ui";
+import { useRouter } from "next/navigation";
+import { Loader2, Plus } from "lucide-react";
+import { clsx } from "clsx";
+import { EmptyState } from "@/components/ui";
 import { currency, number, percent } from "@/lib/format";
 
 type HistoryRow = {
@@ -27,9 +29,8 @@ type SnapshotPosition = {
   accountId: string | null;
   category: "cash" | "benefit" | "investment" | "cashback";
   amount: string | number;
-  source: string;
   person: { name: string } | null;
-  account: { name: string; accountType: string } | null;
+  account: { name: string } | null;
 };
 
 type SnapshotDetail = {
@@ -40,28 +41,6 @@ type SnapshotDetail = {
   selicAnnual: string | number;
   notes: string | null;
   positions: SnapshotPosition[];
-};
-
-type SnapshotPreview = {
-  kpis: {
-    cashTotal: number;
-    investmentsTotal: number;
-    assetsTotal: number;
-    debtPvTotal: number;
-    netWorth: number;
-    monthlyVariation: number;
-    debtToAssets: number;
-    reserveMonths: number;
-    patrimonialSavingsRate: number;
-    budgetSavingsRate: number;
-  };
-  budget: {
-    incomeTotal: number;
-    expenseTotal: number;
-    monthlySurplus: number;
-    cardMovingAverageExpense?: number;
-    cardMovingAverageApplied?: boolean;
-  };
 };
 
 const categoryLabels: Record<SnapshotPosition["category"], string> = {
@@ -77,190 +56,278 @@ const statusLabels: Record<string, string> = {
   revised: "Revisado",
 };
 
-export function BalanceSheetManager({ history }: { history: HistoryRow[] }) {
-  const initialId = history.at(-1)?.id ?? null;
-  const [selectedId, setSelectedId] = useState<string | null>(initialId);
-  const [detail, setDetail] = useState<SnapshotDetail | null>(null);
-  const [preview, setPreview] = useState<SnapshotPreview | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const selectedRow = useMemo(() => history.find((row) => row.id === selectedId) ?? history.at(-1) ?? null, [history, selectedId]);
+function shortMonthYear(period: string) {
+  const date = new Date(period.slice(0, 10));
+  const month = new Intl.DateTimeFormat("pt-BR", { month: "short", timeZone: "UTC" }).format(date).replace(".", "");
+  return `${month}/${String(date.getUTCFullYear()).slice(2)}`;
+}
 
-  async function loadSnapshot(id: string) {
+function fullMonthYear(period: string) {
+  const date = new Date(period.slice(0, 10));
+  const month = new Intl.DateTimeFormat("pt-BR", { month: "long", timeZone: "UTC" }).format(date);
+  return `${month.charAt(0).toUpperCase()}${month.slice(1)} ${date.getUTCFullYear()}`;
+}
+
+function initials(name: string) {
+  const words = name.trim().split(/\s+/);
+  const text = words.length > 1 ? words[0][0] + words[1][0] : name.slice(0, 2);
+  return text.toUpperCase();
+}
+
+function signedCurrency(value: number) {
+  return `${value > 0 ? "+" : ""}${currency(value)}`;
+}
+
+export function BalanceSheetManager({ history }: { history: HistoryRow[] }) {
+  const router = useRouter();
+  const [selectedId, setSelectedId] = useState<string | null>(history.at(-1)?.id ?? null);
+  const [detail, setDetail] = useState<SnapshotDetail | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [isRevising, setIsRevising] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const rows = useMemo(() => [...history].reverse(), [history]);
+  const maxNetWorth = useMemo(() => Math.max(...history.map((row) => row.netWorth), 0), [history]);
+  const selectedRow = useMemo(() => history.find((row) => row.id === selectedId) ?? null, [history, selectedId]);
+
+  const personGroups = useMemo(() => {
+    if (!detail) return [];
+    const groups = new Map<string, { name: string; positions: SnapshotPosition[] }>();
+    for (const position of detail.positions) {
+      const name = position.person?.name ?? position.personId;
+      const group = groups.get(position.personId) ?? { name, positions: [] };
+      group.positions.push(position);
+      groups.set(position.personId, group);
+    }
+    const label = (position: SnapshotPosition) => position.account?.name ?? categoryLabels[position.category];
+    return [...groups.values()]
+      .sort((a, b) => a.name.localeCompare(b.name, "pt-BR"))
+      .map((group) => ({
+        ...group,
+        subtotal: group.positions.reduce((sum, position) => sum + Number(position.amount), 0),
+        positions: [...group.positions].sort((a, b) => label(a).localeCompare(label(b), "pt-BR")),
+      }));
+  }, [detail]);
+
+  useEffect(() => {
+    if (!selectedId) return;
+    const controller = new AbortController();
     setIsLoading(true);
     setError(null);
+    fetch(`/api/monthly-snapshots/${selectedId}`, { signal: controller.signal })
+      .then(async (response) => {
+        if (!response.ok) throw new Error("Não foi possível carregar o mês selecionado.");
+        setDetail(await response.json());
+      })
+      .catch((loadError) => {
+        if (loadError instanceof DOMException && loadError.name === "AbortError") return;
+        setDetail(null);
+        setError(loadError instanceof Error ? loadError.message : "Falha ao carregar o mês.");
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setIsLoading(false);
+      });
+    return () => controller.abort();
+  }, [selectedId]);
+
+  async function createRevision() {
+    if (!detail || detail.status !== "closed") return;
+    setIsRevising(true);
+    setError(null);
     try {
-      const [detailResponse, previewResponse] = await Promise.all([
-        fetch(`/api/monthly-snapshots/${id}`),
-        fetch(`/api/monthly-snapshots/${id}/preview`),
-      ]);
-      if (!detailResponse.ok || !previewResponse.ok) {
-        throw new Error("Não foi possível carregar o balancete selecionado.");
+      const response = await fetch(`/api/monthly-snapshots/${detail.id}/revise`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ notes: `Revisão criada a partir da versão ${detail.revisionNumber}` }),
+      });
+      if (!response.ok) {
+        const body = await response.json().catch(() => null);
+        throw new Error(body?.error ?? "Não foi possível criar a revisão.");
       }
-      setDetail(await detailResponse.json());
-      setPreview(await previewResponse.json());
-    } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : "Falha ao carregar balancete.");
-    } finally {
-      setIsLoading(false);
+      const created = (await response.json()) as { id: string };
+      router.push(`/fechamento?snapshot=${created.id}`);
+    } catch (reviseError) {
+      setError(reviseError instanceof Error ? reviseError.message : "Não foi possível criar a revisão.");
+      setIsRevising(false);
     }
   }
 
-  useEffect(() => {
-    if (selectedId) void loadSnapshot(selectedId);
-  }, [selectedId]);
-
   if (history.length === 0) {
     return (
-      <Panel>
-        <h2 className="text-base font-semibold text-white">Nenhum balancete encontrado</h2>
-        <p className="mt-2 text-sm text-slate-400">Importe a planilha ou crie um fechamento mensal para iniciar o histórico.</p>
-      </Panel>
+      <EmptyState
+        title="Nenhum fechamento ainda"
+        description="Feche o primeiro mês (ou importe a planilha em Dados e relatórios) para começar o histórico."
+      />
     );
   }
 
   return (
-    <div className="grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
-      <Panel className="overflow-hidden p-0">
-        <div className="border-b border-line px-4 py-3">
-          <h2 className="text-base font-semibold text-white">Histórico mensal</h2>
-          <p className="mt-1 text-sm text-slate-400">Selecione um mês para ver contas, pessoas, categorias e indicadores recalculados.</p>
-        </div>
-        <div className="overflow-x-auto">
-          <table className="min-w-full divide-y divide-line text-sm">
-            <thead className="bg-panel2 text-xs uppercase tracking-[0.12em] text-slate-500">
-              <tr>
-                <Th>Mês</Th>
-                <Th>Status</Th>
-                <Th>Caixa</Th>
-                <Th>Investimentos</Th>
-                <Th>Dívida PV</Th>
-                <Th>PL Total</Th>
-                <Th>Variação</Th>
-                <Th>D/A</Th>
-                <Th>Reserva</Th>
-                <Th>Tx. Poup.</Th>
-                <Th>Abrir</Th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-line">
-              {history.map((row) => (
-                <tr key={row.id} className={row.id === selectedId ? "bg-panel2" : "hover:bg-panel2/50"}>
-                  <Td>{row.month}</Td>
-                  <Td>{statusLabels[row.status] ?? row.status}</Td>
-                  <Td>{currency(row.cashTotal)}</Td>
-                  <Td>{currency(row.investmentsTotal)}</Td>
-                  <Td>{currency(row.debtPvTotal)}</Td>
-                  <Td className="font-semibold text-white">{currency(row.netWorth)}</Td>
-                  <Td className={row.monthlyVariation >= 0 ? "text-green" : "text-magenta"}>{currency(row.monthlyVariation)}</Td>
-                  <Td>{percent(row.debtToAssets, 1)}</Td>
-                  <Td>{number(row.reserveMonths, 2)}</Td>
-                  <Td>{percent(row.patrimonialSavingsRate, 1)}</Td>
-                  <Td>
-                    <button
-                      type="button"
-                      onClick={() => setSelectedId(row.id)}
-                      className="focus-ring inline-flex h-8 w-8 items-center justify-center rounded-md border border-line text-slate-400 hover:border-cyan hover:text-white"
-                      aria-label={`Abrir balancete ${row.month}`}
-                    >
-                      <Eye className="h-4 w-4" />
-                    </button>
-                  </Td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </Panel>
-
-      <Panel>
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <h2 className="text-base font-semibold text-white">{selectedRow ? `Balancete ${selectedRow.month}` : "Balancete"}</h2>
-            <p className="mt-1 text-sm text-slate-400">
-              {detail ? `${statusLabels[detail.status] ?? detail.status} - revisão ${detail.revisionNumber}` : "Carregando detalhamento"}
-            </p>
+    <div className="grid items-start gap-4 lg:grid-cols-[1.35fr_1fr]">
+      <section className="min-w-0 overflow-x-auto rounded-[14px] border border-edge bg-surface">
+        <div className="min-w-[560px]">
+          <div className="grid grid-cols-[72px_1fr_120px_96px_64px] items-center gap-3 border-b border-edge-soft bg-surface-2 px-5 py-3 text-[11px] font-semibold uppercase tracking-[0.14em] text-faint">
+            <span>Mês</span>
+            <span>Patrimônio</span>
+            <span className="text-right">Variação</span>
+            <span className="text-right">Reserva</span>
+            <span />
           </div>
-          {selectedId ? (
-            <Button type="button" onClick={() => void loadSnapshot(selectedId)} disabled={isLoading} className="px-3">
-              <RefreshCw className="h-4 w-4" />
-              Atualizar
-            </Button>
-          ) : null}
+          {rows.map((row) => {
+            const selected = row.id === selectedId;
+            return (
+              <div
+                key={row.id}
+                onClick={() => setSelectedId(row.id)}
+                className={clsx(
+                  "grid cursor-pointer grid-cols-[72px_1fr_120px_96px_64px] items-center gap-3 border-b border-edge-hair px-5 py-3 last:border-b-0 hover:bg-[#101A2E]",
+                  selected && "bg-[#101A2E]",
+                )}
+              >
+                <div>
+                  <div className="text-[13px] font-semibold tabular-nums text-snow">{shortMonthYear(row.periodMonth)}</div>
+                  <div className={clsx("text-[11px]", row.status === "revised" ? "text-gold-light" : "text-faint")}>
+                    {statusLabels[row.status] ?? row.status}
+                  </div>
+                </div>
+                <div className="min-w-0">
+                  <div className="text-[13px] font-semibold tabular-nums text-body">{currency(row.netWorth)}</div>
+                  <div className="mt-1.5 h-1 max-w-[220px] rounded-full bg-elevated">
+                    <div
+                      className="h-1 rounded-full bg-gold"
+                      style={{ width: `${maxNetWorth > 0 ? Math.max((row.netWorth / maxNetWorth) * 100, 2) : 0}%` }}
+                    />
+                  </div>
+                </div>
+                <span
+                  className={clsx(
+                    "justify-self-end rounded-full px-2.5 py-0.5 text-[11px] font-semibold tabular-nums",
+                    row.monthlyVariation >= 0 ? "bg-positive/[0.12] text-positive-text" : "bg-negative/[0.12] text-negative-text",
+                  )}
+                >
+                  {signedCurrency(row.monthlyVariation)}
+                </span>
+                <span className="text-right text-xs tabular-nums text-muted">{number(row.reserveMonths, 1)} meses</span>
+                <button
+                  type="button"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    setSelectedId(row.id);
+                  }}
+                  className="focus-ring justify-self-end rounded-lg border border-edge px-2.5 py-1.5 text-[11px] font-semibold text-muted hover:border-gold hover:text-gold-light"
+                  aria-label={`Abrir detalhes de ${fullMonthYear(row.periodMonth)}`}
+                >
+                  Abrir
+                </button>
+              </div>
+            );
+          })}
         </div>
+      </section>
 
-        {error ? <p className="mt-4 rounded-md border border-red-400/40 bg-red-400/10 p-3 text-sm text-red-200">{error}</p> : null}
-
-        {preview ? (
-          <div className="mt-4 grid gap-3 sm:grid-cols-2">
-            <Metric label="PL total" value={currency(preview.kpis.netWorth)} tone="text-cyan" />
-            <Metric label="Ativos" value={currency(preview.kpis.assetsTotal)} />
-            <Metric label="Dívida PV" value={currency(preview.kpis.debtPvTotal)} />
-            <Metric label="Reserva" value={`${number(preview.kpis.reserveMonths, 2)} meses`} />
-            <Metric label="Poupança patrimonial" value={percent(preview.kpis.patrimonialSavingsRate, 1)} />
-            <Metric label="Poupança orçamentária" value={percent(preview.kpis.budgetSavingsRate, 1)} />
-          </div>
-        ) : null}
-
-        {preview?.budget ? (
-          <div className="mt-4 rounded-md border border-line bg-ink p-3 text-sm text-slate-300">
-            <div className="grid gap-2 sm:grid-cols-2">
-              <span>Receita: {currency(preview.budget.incomeTotal)}</span>
-              <span>Despesa: {currency(preview.budget.expenseTotal)}</span>
-              <span>Sobra: {currency(preview.budget.monthlySurplus)}</span>
-              <span>
-                Cartão média: {currency(preview.budget.cardMovingAverageExpense ?? 0)}
-                {preview.budget.cardMovingAverageApplied === false ? " (já coberto)" : ""}
+      <section className="min-w-0 rounded-[14px] border border-edge bg-surface p-6 lg:sticky lg:top-24">
+        {selectedRow ? (
+          <>
+            <div className="flex flex-wrap items-baseline justify-between gap-3">
+              <h2 className="font-display text-lg font-normal text-snow">{fullMonthYear(selectedRow.periodMonth)}</h2>
+              <span
+                className={clsx(
+                  "rounded-full px-2.5 py-0.5 text-[11px] font-semibold",
+                  selectedRow.status === "revised" ? "bg-gold/[0.14] text-gold-light" : "bg-positive/[0.12] text-positive-text",
+                )}
+              >
+                {statusLabels[selectedRow.status] ?? selectedRow.status}
+                {detail ? ` · rev ${detail.revisionNumber}` : ""}
               </span>
             </div>
-          </div>
-        ) : null}
 
-        <div className="mt-4">
-          <h3 className="text-sm font-semibold text-white">Posições</h3>
-          <div className="mt-2 max-h-[520px] overflow-auto rounded-md border border-line">
-            <table className="min-w-full text-sm">
-              <thead className="sticky top-0 bg-panel2 text-left text-xs uppercase tracking-[0.12em] text-slate-500">
-                <tr>
-                  <Th>Conta</Th>
-                  <Th>Pessoa</Th>
-                  <Th>Categoria</Th>
-                  <Th>Valor</Th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-line">
-                {detail?.positions.map((position) => (
-                  <tr key={position.id}>
-                    <Td>{position.account?.name ?? "Sem conta"}</Td>
-                    <Td>{position.person?.name ?? position.personId}</Td>
-                    <Td>{categoryLabels[position.category]}</Td>
-                    <Td className="font-medium text-white">{currency(Number(position.amount))}</Td>
-                  </tr>
+            <div className="mt-4 grid grid-cols-2 gap-3">
+              <DetailKpi label="Patrimônio" value={currency(selectedRow.netWorth)} />
+              <DetailKpi
+                label="Variação"
+                value={signedCurrency(selectedRow.monthlyVariation)}
+                tone={selectedRow.monthlyVariation >= 0 ? "positive" : "negative"}
+              />
+              <DetailKpi label="Dívida / ativos" value={percent(selectedRow.debtToAssets, 1)} />
+              <DetailKpi label="Poupança" value={percent(selectedRow.patrimonialSavingsRate, 1)} />
+            </div>
+
+            <h3 className="mt-5 text-xs font-semibold uppercase tracking-[0.14em] text-faint">Posições do mês</h3>
+            {error ? <p className="mt-3 rounded-[10px] border border-negative/40 bg-negative/[0.08] p-3 text-xs text-negative-text">{error}</p> : null}
+            {isLoading ? (
+              <p className="mt-3 inline-flex items-center gap-2 text-[13px] text-muted">
+                <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+                Carregando posições…
+              </p>
+            ) : (
+              <div className="mt-3 flex flex-col gap-4">
+                {personGroups.map((group) => (
+                  <div key={group.name}>
+                    <div className="flex items-center gap-2 text-[13px] font-semibold text-snow">
+                      <span className="grid h-6 w-6 place-items-center rounded-full border border-edge bg-elevated text-[9px] text-gold">
+                        {initials(group.name)}
+                      </span>
+                      {group.name}
+                      <span className="ml-auto font-medium tabular-nums text-muted">{currency(group.subtotal)}</span>
+                    </div>
+                    <div className="mt-2 flex flex-col gap-1.5 pl-8">
+                      {group.positions.map((position) => (
+                        <div key={position.id} className="flex justify-between gap-3 text-xs">
+                          <span className="text-muted">
+                            {position.account?.name ?? categoryLabels[position.category]}
+                            {position.account ? ` · ${categoryLabels[position.category]}` : ""}
+                          </span>
+                          <span className="tabular-nums text-body">{currency(Number(position.amount))}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
                 ))}
-              </tbody>
-            </table>
-            {!detail && !isLoading ? <p className="p-4 text-sm text-slate-400">Selecione um mês para carregar as posições.</p> : null}
-            {isLoading ? <p className="p-4 text-sm text-slate-400">Carregando balancete...</p> : null}
-          </div>
-        </div>
-      </Panel>
+              </div>
+            )}
+
+            <div className="mt-5 flex items-center justify-between gap-3 border-t border-edge-soft pt-3.5 text-xs text-muted">
+              <span>
+                Selic do mês:{" "}
+                <strong className="font-semibold tabular-nums text-snow">
+                  {detail ? percent(Number(detail.selicAnnual), 2) : "—"}
+                </strong>
+              </span>
+              {detail?.status === "closed" ? (
+                <button
+                  type="button"
+                  onClick={() => void createRevision()}
+                  disabled={isRevising}
+                  className="focus-ring inline-flex items-center gap-1.5 text-xs font-semibold text-gold hover:text-gold-light disabled:opacity-60"
+                >
+                  {isRevising ? <Loader2 className="h-3 w-3 animate-spin" aria-hidden /> : <Plus className="h-3 w-3" aria-hidden />}
+                  Criar revisão
+                </button>
+              ) : null}
+              {detail?.status === "revised" ? <span className="text-gold-light">Há uma revisão deste mês em andamento.</span> : null}
+            </div>
+          </>
+        ) : (
+          <p className="text-sm text-muted">Selecione um mês na lista para ver os detalhes.</p>
+        )}
+      </section>
     </div>
   );
 }
 
-function Metric({ label, tone = "text-white", value }: { label: string; tone?: string; value: string }) {
+function DetailKpi({ label, value, tone }: { label: string; value: string; tone?: "positive" | "negative" }) {
   return (
-    <div className="rounded-md border border-line bg-ink p-3">
-      <div className="text-xs uppercase tracking-[0.14em] text-slate-500">{label}</div>
-      <div className={`mt-2 text-lg font-semibold ${tone}`}>{value}</div>
+    <div className="rounded-[10px] border border-edge-soft bg-surface-2 p-3.5">
+      <div className="text-[11px] uppercase tracking-[0.12em] text-faint">{label}</div>
+      <div
+        className={clsx(
+          "mt-1.5 text-[17px] font-semibold tabular-nums",
+          tone === "positive" && "text-positive-text",
+          tone === "negative" && "text-negative-text",
+          !tone && "text-snow",
+        )}
+      >
+        {value}
+      </div>
     </div>
   );
-}
-
-function Th({ children }: { children: React.ReactNode }) {
-  return <th className="px-4 py-3 text-left font-semibold">{children}</th>;
-}
-
-function Td({ children, className = "" }: { children: React.ReactNode; className?: string }) {
-  return <td className={`whitespace-nowrap px-4 py-3 text-slate-300 ${className}`}>{children}</td>;
 }

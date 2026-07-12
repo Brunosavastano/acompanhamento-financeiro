@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { Loader2 } from "lucide-react";
 import { signIn } from "next-auth/react";
 
 export function LoginForm() {
@@ -26,39 +27,42 @@ export function LoginForm() {
     window.location.href = "/welcome";
   }
 
+  const inputClassName =
+    "mt-2 block w-full rounded-[10px] border border-edge bg-surface px-3.5 py-3 text-sm text-snow placeholder:text-faint focus:border-gold focus:outline-none";
+
   return (
-    <form onSubmit={submit} className="w-full rounded-lg border border-line/80 bg-panel/70 p-6 text-left shadow-glow backdrop-blur">
-      <h2 className="text-xl font-semibold text-white">Entrar</h2>
-      <label className="mt-6 block text-sm font-medium text-slate-300">
-        E-mail
+    <form onSubmit={submit} className="mt-8 flex flex-col gap-4">
+      <label className="block text-xs font-semibold tracking-[0.06em] text-muted">
+        E-MAIL
         <input
           value={email}
           onChange={(event) => setEmail(event.target.value)}
-          className="focus-ring mt-2 w-full rounded-md border border-line bg-panel px-3 py-2 text-sm text-white"
+          className={inputClassName}
           type="email"
           placeholder="seu@email.com"
           autoComplete="email"
           required
         />
       </label>
-      <label className="mt-4 block text-sm font-medium text-slate-300">
-        Senha
+      <label className="block text-xs font-semibold tracking-[0.06em] text-muted">
+        SENHA
         <input
           value={password}
           onChange={(event) => setPassword(event.target.value)}
-          className="focus-ring mt-2 w-full rounded-md border border-line bg-panel px-3 py-2 text-sm text-white"
+          className={inputClassName}
           type="password"
           placeholder="Sua senha"
           autoComplete="current-password"
           required
         />
       </label>
-      {error ? <p className="mt-4 text-sm text-magenta">{error}</p> : null}
+      {error ? <p className="text-[13px] text-negative-text">{error}</p> : null}
       <button
         disabled={loading}
-        className="focus-ring mt-6 w-full rounded-md bg-cyan px-4 py-2 text-sm font-semibold text-ink disabled:cursor-not-allowed disabled:opacity-60"
+        className="focus-ring mt-2 inline-flex w-full items-center justify-center gap-2 rounded-[10px] bg-gold py-[13px] text-sm font-bold text-sidebar hover:bg-gold-light disabled:cursor-not-allowed disabled:opacity-60"
       >
-        {loading ? "Entrando..." : "Entrar"}
+        {loading ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : null}
+        {loading ? "Entrando…" : "Entrar"}
       </button>
     </form>
   );
