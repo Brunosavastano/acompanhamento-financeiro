@@ -85,6 +85,14 @@ const sourceLabels: Record<Goal["progressSource"], string> = {
   empty: "Sem progresso registrado",
 };
 
+// O seed/import antigo gravava o status ("⚠️ Em progresso", "✅ Atingido"…) no campo
+// notes, que agora só duplica o badge calculado. Detecta essas notas-marcador para não
+// exibi-las como descrição e para limpar o campo ao abrir a edição.
+const STATUS_MARKER = /^[\s⚠️✅❌⏳🔴🟡🟢]*(Em progresso|Atingido|Atingida|Atenç[aã]o|Longo prazo)\s*$/u;
+function isStatusMarker(notes: string | null | undefined): boolean {
+  return !!notes && STATUS_MARKER.test(notes);
+}
+
 const emptyGoalForm = (horizon: GoalForm["horizon"]): GoalForm => ({
   title: "",
   horizon,
@@ -160,7 +168,7 @@ export function GoalManager({ period, initialGoals }: { period: string; initialG
       targetDate: goal.targetDate ?? "",
       comparisonOperator: goal.comparisonOperator,
       riskCapValue: goal.riskCapValue ?? "",
-      notes: goal.notes ?? "",
+      notes: isStatusMarker(goal.notes) ? "" : goal.notes ?? "",
       manualCurrentValue: goal.currentValue ?? "",
     });
     setMessage(null);
@@ -294,7 +302,9 @@ export function GoalManager({ period, initialGoals }: { period: string; initialG
                             {presentation.pill}
                           </span>
                         </div>
-                        {goal.notes ? <p className="mt-1.5 text-xs leading-[17px] text-muted">{goal.notes}</p> : null}
+                        {goal.notes && !isStatusMarker(goal.notes) ? (
+                          <p className="mt-1.5 text-xs leading-[17px] text-muted">{goal.notes}</p>
+                        ) : null}
                       </div>
                     </div>
                     <div className="flex overflow-hidden rounded-[10px] border border-edge-soft bg-surface-2">
