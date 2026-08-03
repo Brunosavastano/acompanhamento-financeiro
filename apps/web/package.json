@@ -21,9 +21,14 @@
     "test:e2e": "playwright test"
   },
   "dependencies": {
+    "@ai-sdk/anthropic": "^4.0.12",
+    "@ai-sdk/google": "^4.0.12",
+    "@ai-sdk/openai": "^4.0.11",
+    "@ai-sdk/react": "^4.0.23",
     "@finance/financial-calculations": "*",
     "@finance/shared-types": "*",
     "@prisma/client": "^5.21.1",
+    "ai": "^7.0.22",
     "bcryptjs": "^2.4.3",
     "clsx": "^2.1.1",
     "decimal.js": "^10.4.3",

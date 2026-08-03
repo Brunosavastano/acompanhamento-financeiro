@@ -1,9 +1,9 @@
-import { debtCashflowSchema } from "@finance/shared-types";
+import { createDebtCashflowSchema } from "@finance/shared-types";
 import { getCurrentUserId, getRequiredHouseholdId } from "@/lib/authz";
 import { errorResponse, json } from "@/lib/api";
 import { asMonthStart } from "@/lib/date";
 import { prisma } from "@/lib/prisma";
-import { audit } from "@/server/audit";
+import { assertDebtBaseEditable, upsertDeclaredDebt } from "@/server/debts";
 import { assertPersonInHousehold } from "@/server/guards";
 
 export async function GET(request: Request) {
@@ -29,22 +29,23 @@ export async function POST(request: Request) {
   try {
     const householdId = await getRequiredHouseholdId();
     const userId = await getCurrentUserId();
-    const input = debtCashflowSchema.parse(await request.json());
+    const input = createDebtCashflowSchema.parse(await request.json());
     await assertPersonInHousehold(input.personId, householdId);
-    const flow = await prisma.debtCashflow.create({
-      data: {
+    await assertDebtBaseEditable(householdId, asMonthStart(input.invoiceMonth));
+    const result = await prisma.$transaction((tx) =>
+      upsertDeclaredDebt(tx, {
         householdId,
+        userId,
         personId: input.personId,
         cardName: input.cardName,
         invoiceMonth: asMonthStart(input.invoiceMonth),
         paymentMonth: asMonthStart(input.paymentMonth),
         amount: input.amount,
         description: input.description,
-        source: "manual_matrix",
-      },
-    });
-    await audit({ userId, entityType: "debt_cashflow", entityId: flow.id, action: "create", newValue: flow });
-    return json(flow, { status: 201 });
+        mode: input.mode,
+      }),
+    );
+    return json({ ...result.created, replacedCount: result.replaced.length }, { status: 201 });
   } catch (error) {
     return errorResponse(error);
   }

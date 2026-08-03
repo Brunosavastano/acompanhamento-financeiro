@@ -7,6 +7,7 @@ import { audit } from "@/server/audit";
 import { addMonths, calculateBudgetProjection, toMoneyNumber, toNumber } from "@finance/financial-calculations";
 import { toDecimalNumber } from "@/lib/format";
 import { assertPersonInHousehold } from "@/server/guards";
+import { mapCardExpensesLatestBase } from "@/server/metrics";
 
 export async function GET(request: Request) {
   try {
@@ -29,7 +30,7 @@ export async function GET(request: Request) {
             lte: periodMonth,
           },
         },
-        select: { paymentMonth: true, amount: true },
+        select: { personId: true, cardName: true, invoiceMonth: true, paymentMonth: true, amount: true, source: true },
       }),
     ]);
     const metrics = calculateBudgetProjection({
@@ -44,10 +45,7 @@ export async function GET(request: Request) {
         isActive: item.isActive,
       })),
       periodMonth: period,
-      cardExpenses: cardCashflows.map((flow) => ({
-        periodMonth: flow.paymentMonth,
-        amount: toDecimalNumber(flow.amount),
-      })),
+      cardExpenses: mapCardExpensesLatestBase(cardCashflows),
     });
     return json({
       items,

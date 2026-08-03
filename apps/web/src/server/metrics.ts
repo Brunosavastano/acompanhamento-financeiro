@@ -7,6 +7,7 @@ import {
   calculateMonthlyInvoiceMetrics,
   calculatePatrimonyMetrics,
   calculateRequiredCagr,
+  dedupeLatestInvoiceBase,
   monthDiff,
   toMoneyNumber,
   toNumber,
@@ -164,17 +165,14 @@ export async function calculateSnapshotMetrics(householdId: string, snapshotId: 
           lte: snapshot.periodMonth,
         },
       },
-      select: { paymentMonth: true, amount: true },
+      select: { personId: true, cardName: true, invoiceMonth: true, paymentMonth: true, amount: true, source: true },
     }),
   ]);
 
   const budget = calculateBudgetProjection({
     items: mapBudgetItemsForCalculation(budgetItems),
     periodMonth,
-    cardExpenses: cardCashflows.map((flow) => ({
-      periodMonth: flow.paymentMonth,
-      amount: toDecimalNumber(flow.amount),
-    })),
+    cardExpenses: mapCardExpensesLatestBase(cardCashflows),
   });
 
   const debt = calculateDebtMetrics(
@@ -187,13 +185,19 @@ export async function calculateSnapshotMetrics(householdId: string, snapshotId: 
     toDecimalNumber(snapshot.selicAnnual),
     periodMonth,
   );
+  // "Base mais recente vence": re-declarações da mesma fatura em bases
+  // diferentes substituem as projeções antigas em vez de somar com elas.
   const monthlyInvoice = calculateMonthlyInvoiceMetrics(
-    monthlyInvoiceCashflows.map((flow) => ({
-      personId: flow.personId,
-      invoiceMonth: flow.invoiceMonth,
-      paymentMonth: flow.paymentMonth,
-      amount: toDecimalNumber(flow.amount),
-    })),
+    dedupeLatestInvoiceBase(
+      monthlyInvoiceCashflows.map((flow) => ({
+        personId: flow.personId,
+        cardName: flow.cardName,
+        invoiceMonth: flow.invoiceMonth,
+        paymentMonth: flow.paymentMonth,
+        amount: toDecimalNumber(flow.amount),
+        source: flow.source,
+      })),
+    ),
     periodMonth,
   );
   const debtByPersonIds = new Set([...Object.keys(debt.byPerson), ...Object.keys(monthlyInvoice.byPerson)]);
@@ -291,6 +295,50 @@ export async function calculateSnapshotMetrics(householdId: string, snapshotId: 
       cardMovingAverageApplied: budget.cardMovingAverageApplied,
       cardMovingAverageMonths: budget.cardMovingAverageMonths,
     },
+  };
+}
+
+/**
+ * Resumo de dívidas de uma base SEM snapshot (mês em aberto): PV/nominal/float
+ * da base + fatura do mês ("base mais recente vence"), com a Selic informada.
+ * Espelha o bloco `debt` de calculateSnapshotMetrics.
+ */
+export async function calculateDebtSummaryForPeriod(householdId: string, periodMonth: Date, selicAnnual: number) {
+  const [debtCashflows, monthlyInvoiceCashflows] = await Promise.all([
+    prisma.debtCashflow.findMany({ where: { householdId, invoiceMonth: periodMonth } }),
+    prisma.debtCashflow.findMany({ where: { householdId, paymentMonth: periodMonth } }),
+  ]);
+  const mapFlow = (flow: (typeof debtCashflows)[number]) => ({
+    personId: flow.personId,
+    cardName: flow.cardName,
+    invoiceMonth: flow.invoiceMonth,
+    paymentMonth: flow.paymentMonth,
+    amount: toDecimalNumber(flow.amount),
+    source: flow.source,
+  });
+  const debt = calculateDebtMetrics(debtCashflows.map(mapFlow), selicAnnual, periodMonth);
+  const monthlyInvoice = calculateMonthlyInvoiceMetrics(dedupeLatestInvoiceBase(monthlyInvoiceCashflows.map(mapFlow)), periodMonth);
+  const personIds = new Set([...Object.keys(debt.byPerson), ...Object.keys(monthlyInvoice.byPerson)]);
+
+  return {
+    nominalTotal: toMoneyNumber(debt.nominalTotal),
+    presentValueTotal: toMoneyNumber(debt.presentValueTotal),
+    floatGain: toMoneyNumber(debt.floatGain),
+    monthlyInvoiceTotal: toMoneyNumber(monthlyInvoice.monthlyInvoiceTotal),
+    byPerson: Object.fromEntries(
+      [...personIds].map((personId) => {
+        const values = debt.byPerson[personId];
+        return [
+          personId,
+          {
+            nominalTotal: toMoneyNumber(values?.nominalTotal ?? 0),
+            presentValueTotal: toMoneyNumber(values?.presentValueTotal ?? 0),
+            floatGain: toMoneyNumber(values?.floatGain ?? 0),
+            monthlyInvoiceTotal: toMoneyNumber(monthlyInvoice.byPerson[personId] ?? 0),
+          },
+        ];
+      }),
+    ),
   };
 }
 
@@ -565,17 +613,44 @@ async function calculateBudgetProjectionForPeriod(householdId: string, budgetIte
         lte: monthStart,
       },
     },
-    select: { paymentMonth: true, amount: true },
+    select: { personId: true, cardName: true, invoiceMonth: true, paymentMonth: true, amount: true, source: true },
   });
 
   return calculateBudgetProjection({
     items: mapBudgetItemsForCalculation(budgetItems),
     periodMonth: monthStart,
-    cardExpenses: cardCashflows.map((flow) => ({
-      periodMonth: flow.paymentMonth,
-      amount: toDecimalNumber(flow.amount),
-    })),
+    cardExpenses: mapCardExpensesLatestBase(cardCashflows),
   });
+}
+
+/**
+ * Converte fluxos do cartão na janela da média móvel em despesas mensais,
+ * mantendo por (pessoa, cartão, vencimento) apenas a declaração da base mais
+ * recente — evita contar 2× a mesma fatura re-declarada em bases sucessivas.
+ */
+export function mapCardExpensesLatestBase(
+  cardCashflows: {
+    personId: string;
+    cardName: string;
+    invoiceMonth: Date;
+    paymentMonth: Date;
+    amount: Prisma.Decimal | number;
+    source?: string | null;
+  }[],
+) {
+  return dedupeLatestInvoiceBase(
+    cardCashflows.map((flow) => ({
+      personId: flow.personId,
+      cardName: flow.cardName,
+      invoiceMonth: flow.invoiceMonth,
+      paymentMonth: flow.paymentMonth,
+      amount: toDecimalNumber(flow.amount),
+      source: flow.source,
+    })),
+  ).map((flow) => ({
+    periodMonth: flow.paymentMonth,
+    amount: flow.amount,
+  }));
 }
 
 export function serializeDecimalObject<T extends Record<string, Prisma.Decimal | number | string | null>>(row: T) {

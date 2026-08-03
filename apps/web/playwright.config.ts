@@ -19,6 +19,7 @@ export default defineConfig({
         command: "npm run dev:local --prefix ../..",
         url: `${baseURL}/api/health`,
         reuseExistingServer: true,
-        timeout: 120_000,
+        // Primeira subida faz initdb do Postgres embutido + migrações + seed + boot do Next.
+        timeout: 300_000,
       },
 });

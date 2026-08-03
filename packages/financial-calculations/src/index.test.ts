@@ -8,6 +8,7 @@ import {
   calculateMovingAverageExpense,
   calculatePatrimonyMetrics,
   calculateRequiredCagr,
+  dedupeLatestInvoiceBase,
   presentValue,
   toMoneyNumber,
 } from "./index";
@@ -150,6 +151,42 @@ describe("financial calculations", () => {
     expect(toMoneyNumber(metrics.cardMovingAverageAppliedExpense)).toBe(0);
     expect(metrics.cardMovingAverageApplied).toBe(false);
     expect(toMoneyNumber(metrics.variableExpenseTotal)).toBe(1200);
+  });
+
+  it("keeps only the latest invoice base per person, card and payment month", () => {
+    const deduped = dedupeLatestInvoiceBase([
+      // Projeção de setembro declarada em julho e re-declarada em agosto: só agosto vale.
+      { personId: "bruno", cardName: "Cartão principal", invoiceMonth: "2026-07-01", paymentMonth: "2026-09-01", amount: 8000 },
+      { personId: "bruno", cardName: "Cartão principal", invoiceMonth: "2026-08-01", paymentMonth: "2026-09-01", amount: 7772.28 },
+      // Parcela antiga nunca re-declarada continua contando.
+      { personId: "bruno", cardName: "Cartão principal", invoiceMonth: "2026-05-01", paymentMonth: "2026-12-01", amount: 250 },
+      // Pessoas e cartões diferentes não se substituem.
+      { personId: "tatiane", cardName: "Cartão principal", invoiceMonth: "2026-07-01", paymentMonth: "2026-09-01", amount: 400 },
+      { personId: "bruno", cardName: "Outro cartão", invoiceMonth: "2026-07-01", paymentMonth: "2026-09-01", amount: 150 },
+      // Duas linhas na MESMA base e mês (parcelas distintas) são preservadas.
+      { personId: "bruno", cardName: "Cartão principal", invoiceMonth: "2026-08-01", paymentMonth: "2026-10-01", amount: 100 },
+      { personId: "bruno", cardName: "Cartão principal", invoiceMonth: "2026-08-01", paymentMonth: "2026-10-01", amount: 200 },
+    ]);
+
+    expect(deduped.map((flow) => flow.amount)).toEqual([7772.28, 250, 400, 150, 100, 200]);
+  });
+
+  it("keeps additive purchases across bases without evicting declared projections", () => {
+    const deduped = dedupeLatestInvoiceBase([
+      // Projeção de novembro declarada na base de agosto.
+      { personId: "bruno", cardName: "Cartão principal", invoiceMonth: "2026-08-01", paymentMonth: "2026-11-01", amount: 2000, source: "manual_matrix" },
+      // Parcela avulsa lançada numa base MAIS NOVA: soma, não evicta a projeção.
+      { personId: "bruno", cardName: "Cartão principal", invoiceMonth: "2026-09-01", paymentMonth: "2026-11-01", amount: 100, source: "purchase" },
+    ]);
+    expect(deduped.map((flow) => flow.amount)).toEqual([2000, 100]);
+
+    // E uma declaração mais nova continua substituindo a antiga, preservando a avulsa.
+    const withNewerDeclaration = dedupeLatestInvoiceBase([
+      { personId: "bruno", cardName: "Cartão principal", invoiceMonth: "2026-08-01", paymentMonth: "2026-11-01", amount: 2000, source: "manual_matrix" },
+      { personId: "bruno", cardName: "Cartão principal", invoiceMonth: "2026-09-01", paymentMonth: "2026-11-01", amount: 100, source: "purchase" },
+      { personId: "bruno", cardName: "Cartão principal", invoiceMonth: "2026-10-01", paymentMonth: "2026-11-01", amount: 2200, source: "adjustment" },
+    ]);
+    expect(withNewerDeclaration.map((flow) => flow.amount)).toEqual([100, 2200]);
   });
 
   it("calculates goal progress and CAGR", () => {
