@@ -8,6 +8,7 @@ import { POST as reviseSnapshot } from "@/app/api/monthly-snapshots/[id]/revise/
 import { POST as createPosition } from "@/app/api/monthly-snapshots/[id]/positions/route";
 import { DELETE as deletePosition, PUT as updatePosition } from "@/app/api/monthly-snapshots/[id]/positions/[positionId]/route";
 import { POST as createDebt } from "@/app/api/debts/route";
+import { POST as bulkDebts } from "@/app/api/debts/bulk/route";
 import { DELETE as deleteDebt, PUT as updateDebt } from "@/app/api/debt-cashflows/[id]/route";
 import { GET as debtSummary } from "@/app/api/debts/summary/route";
 import { GET as getDashboard } from "@/app/api/dashboard/route";
@@ -42,6 +43,7 @@ describe.skipIf(!runDbTests)("API route integration flows", () => {
   });
 
   beforeEach(async () => {
+    mockedAuth.userId = null;
     mockedAuth.householdId = `api-test-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     await prisma.household.create({
       data: {
@@ -439,6 +441,154 @@ describe.skipIf(!runDbTests)("API route integration flows", () => {
     expect(csv).toContain("amount");
 
     await deleteTestHousehold(foreignHouseholdId);
+  });
+
+  it("replaces declared invoice values, supports bulk entry and dedupes across invoice bases", async () => {
+    const bruno = await prisma.person.findFirstOrThrow({ where: { householdId: mockedAuth.householdId, name: "Bruno" } });
+    const base = { personId: bruno.id, cardName: "Cartão principal", invoiceMonth: "2036-08" };
+
+    // Sessão JWT antiga pode apontar para usuário que não existe mais no banco;
+    // a auditoria deve degradar para "Sistema" em vez de derrubar a gravação (FK).
+    mockedAuth.userId = "stale-user-id-from-old-session";
+
+    // Primeira declaração da projeção de setembro.
+    const firstResponse = await createDebt(jsonRequest({ ...base, paymentMonth: "2036-09", amount: 8000, description: "Projeção inicial" }));
+    expect(firstResponse.status).toBe(201);
+
+    // Re-declarar o MESMO mês substitui em vez de somar.
+    const secondResponse = await createDebt(jsonRequest({ ...base, paymentMonth: "2036-09", amount: 7772.28 }));
+    expect(secondResponse.status).toBe(201);
+    const second = await secondResponse.json();
+    expect(second.replacedCount).toBe(1);
+
+    const september = () =>
+      prisma.debtCashflow.findMany({
+        where: {
+          householdId: mockedAuth.householdId,
+          invoiceMonth: new Date("2036-08-01T00:00:00.000Z"),
+          paymentMonth: new Date("2036-09-01T00:00:00.000Z"),
+        },
+        orderBy: { createdAt: "asc" },
+      });
+    let septemberFlows = await september();
+    expect(septemberFlows).toHaveLength(1);
+    expect(Number(septemberFlows[0].amount)).toBe(7772.28);
+    expect(septemberFlows[0].source).toBe("adjustment");
+
+    // O valor anterior fica preservado na auditoria (action "replace").
+    const auditResponse = await listAuditLogs(new Request("http://test.local/api/audit-logs?take=50"));
+    const auditLogs = await auditResponse.json();
+    const replaceLog = auditLogs.find((log: { entityType: string; action: string }) => log.entityType === "debt_cashflow" && log.action === "replace");
+    expect(replaceLog).toBeDefined();
+    expect(Number(replaceLog.oldValue[0].amount)).toBe(8000);
+
+    // Modo "add" preserva o caso de parcela avulsa que soma ao mês (source "purchase").
+    const extraResponse = await createDebt(jsonRequest({ ...base, paymentMonth: "2036-09", amount: 100, mode: "add", description: "Parcela avulsa" }));
+    expect(extraResponse.status).toBe(201);
+    septemberFlows = await september();
+    expect(septemberFlows).toHaveLength(2);
+    expect(septemberFlows.map((flow) => flow.source).sort()).toEqual(["adjustment", "purchase"]);
+
+    // Lote: substitui setembro (limpando as duas linhas) e cria outubro.
+    const bulkResponse = await bulkDebts(
+      jsonRequest({
+        personId: bruno.id,
+        invoiceMonth: "2036-08",
+        entries: [
+          { paymentMonth: "2036-09", amount: 7500 },
+          { paymentMonth: "2036-10", amount: 4663.45 },
+        ],
+      }),
+    );
+    expect(bulkResponse.status).toBe(201);
+    const bulk = await bulkResponse.json();
+    expect(bulk.replacedCount).toBe(1);
+    expect(bulk.createdCount).toBe(1);
+    septemberFlows = await september();
+    expect(septemberFlows).toHaveLength(1);
+    expect(Number(septemberFlows[0].amount)).toBe(7500);
+
+    // Lote rejeita meses duplicados e vencimento anterior à base.
+    const duplicateBulkResponse = await bulkDebts(
+      jsonRequest({
+        personId: bruno.id,
+        invoiceMonth: "2036-08",
+        entries: [
+          { paymentMonth: "2036-09", amount: 1 },
+          { paymentMonth: "2036-09", amount: 2 },
+        ],
+      }),
+    );
+    expect(duplicateBulkResponse.status).toBe(400);
+    const beforeBaseBulkResponse = await bulkDebts(
+      jsonRequest({ personId: bruno.id, invoiceMonth: "2036-08", entries: [{ paymentMonth: "2036-07", amount: 1 }] }),
+    );
+    expect(beforeBaseBulkResponse.status).toBe(400);
+
+    // "Base mais recente vence": a fatura de outubro declarada na base de agosto
+    // e re-declarada na base de outubro não pode contar duas vezes.
+    const octoberDeclaration = await createDebt(
+      jsonRequest({ personId: bruno.id, cardName: "Cartão principal", invoiceMonth: "2036-10", paymentMonth: "2036-10", amount: 4200 }),
+    );
+    expect(octoberDeclaration.status).toBe(201);
+    const snapshotResponse = await createSnapshot(jsonRequest({ periodMonth: "2036-10", selicAnnual: 0.12 }));
+    expect(snapshotResponse.status).toBe(201);
+    const octoberSummaryResponse = await debtSummary(new Request("http://test.local/api/debts/summary?period_month=2036-10"));
+    expect(octoberSummaryResponse.status).toBe(200);
+    const octoberSummary = await octoberSummaryResponse.json();
+    expect(octoberSummary.monthlyInvoiceTotal).toBe(4200);
+    expect(octoberSummary.byPerson[bruno.id].monthlyInvoiceTotal).toBe(4200);
+
+    // Parcela avulsa em base mais nova SOMA à declaração, em vez de evictá-la.
+    const crossBasePurchase = await createDebt(
+      jsonRequest({ personId: bruno.id, cardName: "Cartão principal", invoiceMonth: "2036-09", paymentMonth: "2036-10", amount: 100, mode: "add" }),
+    );
+    expect(crossBasePurchase.status).toBe(201);
+    const withPurchaseSummary = await (
+      await debtSummary(new Request("http://test.local/api/debts/summary?period_month=2036-10"))
+    ).json();
+    expect(withPurchaseSummary.monthlyInvoiceTotal).toBe(4300);
+
+    // Base de mês FECHADO é imutável: escrita vira 409; revisão em rascunho reabre.
+    const octoberSnapshot = await prisma.monthlySnapshot.findFirstOrThrow({
+      where: { householdId: mockedAuth.householdId, periodMonth: new Date("2036-10-01T00:00:00.000Z") },
+      orderBy: { revisionNumber: "desc" },
+    });
+    for (const position of await prisma.position.findMany({ where: { snapshotId: octoberSnapshot.id } })) {
+      await updatePosition(
+        jsonRequest({ personId: position.personId, accountId: position.accountId, category: position.category, amount: 1000 }),
+        routeParams({ id: octoberSnapshot.id, positionId: position.id }),
+      );
+    }
+    const closeResponse = await closeSnapshot(new Request("http://test.local", { method: "POST" }), routeParams({ id: octoberSnapshot.id }));
+    expect(closeResponse.status).toBe(200);
+
+    const lockedCreateResponse = await createDebt(
+      jsonRequest({ personId: bruno.id, cardName: "Cartão principal", invoiceMonth: "2036-10", paymentMonth: "2036-11", amount: 50 }),
+    );
+    expect(lockedCreateResponse.status).toBe(409);
+    const lockedBulkResponse = await bulkDebts(
+      jsonRequest({ personId: bruno.id, invoiceMonth: "2036-10", entries: [{ paymentMonth: "2036-11", amount: 50 }] }),
+    );
+    expect(lockedBulkResponse.status).toBe(409);
+
+    const octoberFlow = await prisma.debtCashflow.findFirstOrThrow({
+      where: { householdId: mockedAuth.householdId, invoiceMonth: new Date("2036-10-01T00:00:00.000Z") },
+    });
+    const lockedUpdateResponse = await updateDebt(
+      jsonRequest({ personId: bruno.id, cardName: "Cartão principal", invoiceMonth: "2036-10", paymentMonth: "2036-10", amount: 4100 }),
+      routeParams({ id: octoberFlow.id }),
+    );
+    expect(lockedUpdateResponse.status).toBe(409);
+    const lockedDeleteResponse = await deleteDebt(new Request("http://test.local", { method: "DELETE" }), routeParams({ id: octoberFlow.id }));
+    expect(lockedDeleteResponse.status).toBe(409);
+
+    const reviseResponse = await reviseSnapshot(jsonRequest({ notes: "Reabrir outubro" }), routeParams({ id: octoberSnapshot.id }));
+    expect(reviseResponse.status).toBe(201);
+    const reopenedCreateResponse = await createDebt(
+      jsonRequest({ personId: bruno.id, cardName: "Cartão principal", invoiceMonth: "2036-10", paymentMonth: "2036-11", amount: 50 }),
+    );
+    expect(reopenedCreateResponse.status).toBe(201);
   });
 
   it("manages people and accounts through settings API routes", async () => {

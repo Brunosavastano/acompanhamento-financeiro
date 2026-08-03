@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { AlertCircle, CheckCircle2, Loader2, Pencil, Plus, Save, Trash2, X } from "lucide-react";
 import { clsx } from "clsx";
+import { DebtBulkPanel } from "@/components/debt-bulk-panel";
 import { Input, Select } from "@/components/ui";
 import { currency } from "@/lib/format";
 
@@ -41,7 +42,17 @@ function initials(name: string) {
   return text.toUpperCase();
 }
 
-export function DebtManager({ people, period }: { people: Person[]; period: string }) {
+export function DebtManager({
+  people,
+  period,
+  aiReaderAvailable = false,
+  baseLocked = false,
+}: {
+  people: Person[];
+  period: string;
+  aiReaderAvailable?: boolean;
+  baseLocked?: boolean;
+}) {
   const [flows, setFlows] = useState<Flow[]>([]);
   const [summary, setSummary] = useState({ nominalTotal: 0, presentValueTotal: 0, floatGain: 0, monthlyInvoiceTotal: 0 });
   const [isLoading, setIsLoading] = useState(true);
@@ -78,6 +89,7 @@ export function DebtManager({ people, period }: { people: Person[]; period: stri
   const maxMonthTotal = useMemo(() => Math.max(...timeline.map((group) => group.total), 0), [timeline]);
   const highlightMonth = timeline.some((group) => group.month === period) ? period : timeline[0]?.month;
 
+
   async function load() {
     try {
       const [flowResponse, summaryResponse] = await Promise.all([
@@ -112,16 +124,18 @@ export function DebtManager({ people, period }: { people: Person[]; period: stri
     setIsSubmitting(true);
     setFeedback(null);
     try {
+      // Substituição é o comportamento único: o valor novo vale para o mês;
+      // o anterior fica na auditoria, sem prompts nem confirmações.
       const response = await fetch("/api/debts", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ ...form, amount: Number(form.amount), cardName: "Cartão principal" }),
       });
       if (!response.ok) {
-        throw new Error(await apiErrorMessage(response, "Não foi possível adicionar a parcela."));
+        throw new Error(await apiErrorMessage(response, "Não foi possível salvar o lançamento."));
       }
       setForm((current) => ({ ...current, amount: "", description: "" }));
-      setFeedback({ kind: "success", text: "Lançamento adicionado." });
+      setFeedback({ kind: "success", text: "Lançamento salvo." });
       await load();
     } catch (error) {
       setFeedback({ kind: "error", text: error instanceof Error ? error.message : "Falha ao adicionar parcela." });
@@ -303,13 +317,13 @@ export function DebtManager({ people, period }: { people: Person[]; period: stri
                               </span>
                               <span className="truncate text-body">{flow.description || `Fatura ${flow.cardName}`}</span>
                               <span className="ml-auto whitespace-nowrap font-medium tabular-nums text-snow">{currency(Number(flow.amount))}</span>
-                              <IconButton label={`Editar lançamento de ${flow.person.name}`} onClick={() => startEdit(flow)}>
+                              <IconButton label={`Editar lançamento de ${flow.person.name}`} disabled={baseLocked} onClick={() => startEdit(flow)}>
                                 <Pencil className="h-[13px] w-[13px]" />
                               </IconButton>
                               <IconButton
                                 label={`Remover lançamento de ${flow.person.name}`}
                                 danger
-                                disabled={deletingId === flow.id}
+                                disabled={baseLocked || deletingId === flow.id}
                                 onClick={() => void deleteFlow(flow.id)}
                               >
                                 {deletingId === flow.id ? <Loader2 className="h-[13px] w-[13px] animate-spin" /> : <Trash2 className="h-[13px] w-[13px]" />}
@@ -328,9 +342,18 @@ export function DebtManager({ people, period }: { people: Person[]; period: stri
 
         <section className="min-w-0 rounded-[14px] border border-edge bg-surface p-6 lg:sticky lg:top-24">
           <h2 className="font-display text-lg font-normal text-snow">Registrar fatura ou parcela</h2>
-          <p className="mt-2 text-xs leading-[18px] text-muted">
-            Informe o total que vai vencer no cartão em um mês futuro. O app desconta para valor presente usando a Selic.
-          </p>
+          {baseLocked ? (
+            <p className="mt-3 rounded-[10px] border border-gold/35 bg-gold/[0.06] px-3.5 py-3 text-xs leading-[18px] text-gold-light">
+              A base de {monthName(period)} pertence a um mês <strong className="font-semibold">fechado</strong> e é somente leitura — alterar
+              aqui reescreveria o histórico. Use as setas acima para ir à base do mês em aberto, ou crie uma revisão do fechamento para
+              ajustar este mês.
+            </p>
+          ) : (
+            <p className="mt-2 text-xs leading-[18px] text-muted">
+              Informe o total que vai vencer no cartão em um mês futuro. O app desconta para valor presente usando a Selic.
+            </p>
+          )}
+          {!baseLocked ? (
           <form onSubmit={submit} className="mt-4 flex flex-col gap-3.5">
             <div className="grid gap-3 sm:grid-cols-2">
               <label className="block text-xs font-semibold text-muted">
@@ -377,6 +400,12 @@ export function DebtManager({ people, period }: { people: Person[]; period: stri
             </button>
             {feedback ? <Feedback kind={feedback.kind} text={feedback.text} /> : null}
           </form>
+          ) : null}
+
+          {!baseLocked ? (
+            <DebtBulkPanel people={people} period={period} aiReaderAvailable={aiReaderAvailable} onSaved={load} />
+          ) : null}
+
           <div className="mt-4 flex items-center justify-between gap-3 border-t border-edge-soft pt-3.5 text-xs text-faint">
             <span>Fatura de {monthName(period)}</span>
             <span className="font-semibold tabular-nums text-body">{currency(summary.monthlyInvoiceTotal)}</span>

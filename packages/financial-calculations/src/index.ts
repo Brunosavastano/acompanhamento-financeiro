@@ -12,9 +12,12 @@ export type PositionInput = {
 
 export type DebtCashflowInput = {
   personId: string;
+  cardName?: string | null;
   invoiceMonth: string | Date;
   paymentMonth: string | Date;
   amount: MoneyLike;
+  /** "purchase" marca parcela avulsa aditiva; demais fontes são declarações de total. */
+  source?: string | null;
 };
 
 export type BudgetItemInput = {
@@ -206,6 +209,32 @@ export function calculateDebtMetrics(
     monthlyInvoiceTotal,
     byPerson,
   };
+}
+
+/**
+ * "A base mais recente vence": para cada (pessoa, cartão, mês de vencimento),
+ * mantém apenas os fluxos declarados na base (`invoiceMonth`) mais nova.
+ *
+ * Isso permite que parcelas antigas nunca re-declaradas continuem contando,
+ * enquanto re-declarações mensais da projeção da fatura (o fluxo real de uso)
+ * substituem as projeções de bases anteriores em vez de somar com elas.
+ */
+export function dedupeLatestInvoiceBase<T extends DebtCashflowInput>(cashflows: T[]): T[] {
+  // Parcela avulsa é aditiva por natureza: não compete como "declaração da
+  // base" nem evicta declarações anteriores — sem isso, uma avulsa numa base
+  // mais nova apagaria das métricas a projeção inteira do mês anterior.
+  const isAdditive = (flow: T) => flow.source === "purchase";
+  const keyOf = (flow: T) => [flow.personId, flow.cardName ?? "", normalizeMonth(flow.paymentMonth)].join("\u0000");
+
+  const latestBaseByKey = new Map<string, string>();
+  for (const flow of cashflows) {
+    if (isAdditive(flow)) continue;
+    const key = keyOf(flow);
+    const base = normalizeMonth(flow.invoiceMonth);
+    const current = latestBaseByKey.get(key);
+    if (!current || base > current) latestBaseByKey.set(key, base);
+  }
+  return cashflows.filter((flow) => isAdditive(flow) || latestBaseByKey.get(keyOf(flow)) === normalizeMonth(flow.invoiceMonth));
 }
 
 export function calculateMonthlyInvoiceMetrics(cashflows: DebtCashflowInput[], periodMonth: string | Date): MonthlyInvoiceMetrics {

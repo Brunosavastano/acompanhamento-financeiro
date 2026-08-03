@@ -89,6 +89,20 @@ export function getVisionModel(): LanguageModel {
   return providerModel(provider, modelId);
 }
 
+/**
+ * Checagem NÃO-lançadora para a UI decidir se mostra o leitor de prints.
+ * Espelha as validações de getVisionModel sem expor mensagens de erro.
+ */
+export function isVisionReaderAvailable(): boolean {
+  if (!isAiEnabled()) return false;
+  try {
+    const provider = resolveProvider();
+    return Boolean(process.env[PROVIDER_KEY_ENV[provider]]) && Boolean(process.env.AI_VISION_MODEL);
+  } catch {
+    return false;
+  }
+}
+
 /** Opções padrão de chamada: timeout duro + no máximo 1 retry, para limitar custo/latência. */
 export function aiCallDefaults(): { maxRetries: number; abortSignal: AbortSignal } {
   return {
