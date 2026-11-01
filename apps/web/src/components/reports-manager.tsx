@@ -156,7 +156,7 @@ export function ReportsManager({
       return;
     }
     const confirmed = window.confirm(
-      `Importar "${file.name}"? A importação substitui a linha de base da planilha e recalcula os indicadores. Os fechamentos feitos no app não são alterados.`,
+      `Importar "${file.name}"? A importação substitui os meses que estão na planilha (saldos, faturas e Selic), TODO o orçamento e TODAS as metas — inclusive itens e metas criados no app. Fechamentos de meses que não estão na planilha não são alterados.`,
     );
     if (!confirmed) return;
     const formData = new FormData();
@@ -166,7 +166,7 @@ export function ReportsManager({
 
   async function importByPath() {
     const confirmed = window.confirm(
-      "Importar a planilha do caminho do servidor? A importação substitui a linha de base e recalcula os indicadores.",
+      "Importar a planilha do caminho do servidor? A importação substitui os meses que estão na planilha (saldos, faturas e Selic), TODO o orçamento e TODAS as metas — inclusive itens e metas criados no app. Fechamentos de meses que não estão na planilha não são alterados.",
     );
     if (!confirmed) return;
     await importExcel({
@@ -230,7 +230,7 @@ export function ReportsManager({
         <section className="rounded-[14px] border border-edge bg-surface p-6">
           <h2 className="font-display text-lg font-normal text-snow">Importar planilha</h2>
           <p className="mt-2 text-xs leading-[18px] text-muted">
-            A importação substitui a linha de base e recalcula todos os indicadores. Os fechamentos feitos no app não são alterados.
+            A importação substitui os meses que estão na planilha (saldos, faturas e Selic), TODO o orçamento e TODAS as metas — inclusive itens e metas criados no app. Fechamentos de meses que não estão na planilha não são alterados.
           </p>
           <button
             type="button"

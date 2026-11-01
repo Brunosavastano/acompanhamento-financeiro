@@ -23,7 +23,11 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
         targetDate: input.targetDate,
         comparisonOperator: input.comparisonOperator,
         riskCapValue: input.riskCapValue,
-        manualCurrentValue: input.manualCurrentValue === null || input.manualCurrentValue === undefined ? null : String(input.manualCurrentValue),
+        // Só mexe no valor atual se ele veio no payload: editar o título não
+        // pode apagar o valor informado de uma meta manual.
+        ...(input.manualCurrentValue !== undefined
+          ? { manualCurrentValue: input.manualCurrentValue === null ? null : String(input.manualCurrentValue) }
+          : {}),
         notes: input.notes,
       },
     });

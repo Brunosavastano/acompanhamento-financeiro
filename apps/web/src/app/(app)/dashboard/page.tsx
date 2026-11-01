@@ -144,10 +144,12 @@ export default async function DashboardPage({
   // não tem mês anterior (variação sintética 0), então fica de fora da média.
   const variationRows = data.charts.monthlyVariation
     .slice(1, currentIndex >= 0 ? currentIndex + 1 : undefined)
-    .map((row) => ({ month: String(row.month), value: Number(row.value) }));
+    .map((row) => ({ month: String(row.month), value: Number(row.value), months: Number(row.months ?? 1) }));
+  // Média por MÊS: um intervalo de 2 meses (mês não fechado) pesa 2, não 1.
   const averageWindow = variationRows.slice(-JANELA_MEDIA_MESES);
+  const averageWindowMonths = averageWindow.reduce((sum, row) => sum + row.months, 0);
   const averageVariation =
-    averageWindow.length > 0 ? averageWindow.reduce((sum, row) => sum + row.value, 0) / averageWindow.length : null;
+    averageWindowMonths > 0 ? averageWindow.reduce((sum, row) => sum + row.value, 0) / averageWindowMonths : null;
 
   const previousMonth = currentIndex > 0 ? history[currentIndex - 1].month : null;
   const latestPeriod = data.availablePeriods[data.availablePeriods.length - 1]?.periodMonth ?? data.periodMonth;
@@ -243,7 +245,10 @@ export default async function DashboardPage({
                     ) : (
                       <ArrowDownRight className="h-3 w-3" strokeWidth={2.5} aria-hidden />
                     )}
-                    {signedBrl0(kpis.monthlyVariation)} em {monthName(data.periodMonth)}
+                    {signedBrl0(kpis.monthlyVariation)}{" "}
+                    {kpis.monthsSincePrevious > 1 && kpis.previousPeriodMonth
+                      ? `desde ${monthName(kpis.previousPeriodMonth)} (${kpis.monthsSincePrevious} meses)`
+                      : `em ${monthName(data.periodMonth)}`}
                   </span>
                   {previousMonth ? (
                     <span className="text-xs text-faint">
@@ -253,7 +258,7 @@ export default async function DashboardPage({
                   {MOSTRAR_MEDIA_VARIACAO && averageVariation !== null ? (
                     <span className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-full bg-info/[0.12] px-2.5 py-1 text-xs font-semibold text-info-text">
                       <TrendingUp className="h-3 w-3" strokeWidth={2.5} aria-hidden />
-                      {signedBrl0(averageVariation)}/mês em média · últimos {averageWindow.length} meses
+                      {signedBrl0(averageVariation)}/mês em média · últimos {averageWindowMonths} meses
                     </span>
                   ) : null}
                 </div>
@@ -285,7 +290,7 @@ export default async function DashboardPage({
               value={currency(kpis.debtPvTotal)}
               side={percent(kpis.debtToAssets, 1)}
               sideTone="negative"
-              sideCaption="do patrimônio"
+              sideCaption="dos ativos"
             />
           </div>
         </div>
@@ -314,21 +319,22 @@ export default async function DashboardPage({
               As faturas futuras equivalem a{kpis.debtToAssets <= 0.05 ? " só" : ""}{" "}
               <strong className="font-semibold text-snow">{percent(kpis.debtToAssets, 1)}</strong> do que a família possui.
             </HealthCard>
+            {/* Número do ORÇAMENTO (planejado), não o que de fato sobrou — o realizado é a variação do patrimônio, no topo. */}
             <HealthCard
-              title="Poupança do mês"
+              title="Sobra planejada"
               badge={health.poupanca.badge}
               tone={health.poupanca.tone}
               barPct={data.budget.budgetSavingsRate * 100 * 2.5}
             >
               {data.budget.budgetSavingsRate >= 0 ? (
                 <>
-                  Sobraram <strong className="font-semibold text-snow">{percent(data.budget.budgetSavingsRate, 1)}</strong> da
-                  renda — cerca de {brl0(data.budget.monthlySurplus)} guardados.
+                  Pelo orçamento, sobram <strong className="font-semibold text-snow">{percent(data.budget.budgetSavingsRate, 1)}</strong> da
+                  renda — cerca de {brl0(data.budget.monthlySurplus)} por mês.
                 </>
               ) : (
                 <>
-                  As despesas superaram a renda em{" "}
-                  <strong className="font-semibold text-snow">{brl0(Math.abs(data.budget.monthlySurplus))}</strong> neste mês.
+                  Pelo orçamento, as despesas superam a renda em{" "}
+                  <strong className="font-semibold text-snow">{brl0(Math.abs(data.budget.monthlySurplus))}</strong> por mês.
                 </>
               )}
             </HealthCard>

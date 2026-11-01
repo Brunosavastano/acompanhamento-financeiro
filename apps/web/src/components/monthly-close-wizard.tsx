@@ -38,9 +38,28 @@ type Position = {
   accountId: string | null;
   category: "cash" | "benefit" | "investment" | "cashback";
   amount: string | number;
+  createdAt?: string;
   account: { name: string } | null;
   person: { name: string };
 };
+
+/** Ordem estável das linhas de uma mesma conta (criação, depois id). */
+function byLineOrder(a: Position, b: Position) {
+  return (a.createdAt ?? "").localeCompare(b.createdAt ?? "") || a.id.localeCompare(b.id);
+}
+
+/** Posição de cada linha entre as linhas da mesma conta (0, 1, ...). */
+function accountLineIndexes(positions: Position[]) {
+  const seen = new Map<string, number>();
+  const indexes = new Map<string, number>();
+  for (const position of [...positions].sort(byLineOrder)) {
+    if (!position.accountId) continue;
+    const index = seen.get(position.accountId) ?? 0;
+    indexes.set(position.id, index);
+    seen.set(position.accountId, index + 1);
+  }
+  return { indexes, linesPerAccount: seen };
+}
 
 type Snapshot = {
   id: string;
@@ -66,19 +85,24 @@ type Preview = {
   budget: { monthlySurplus: number };
 };
 
+type DebtSummary = {
+  nominalTotal: number;
+  presentValueTotal: number;
+  floatGain: number;
+  monthlyInvoiceTotal: number;
+  byPerson: Record<string, { nominalTotal: number; presentValueTotal: number }>;
+};
+
 type Review = {
-  debt: {
-    nominalTotal: number;
-    presentValueTotal: number;
-    floatGain: number;
-    monthlyInvoiceTotal: number;
-  };
+  debt: DebtSummary;
   budget: {
     incomeTotal: number;
     expenseTotal: number;
     monthlySurplus: number;
     incomeCommitment: number;
+    cardMovingAverageExpense: number;
     cardMovingAverageAppliedExpense: number;
+    cardMovingAverageApplied: boolean;
     cardMovingAverageMonths: number;
   };
 };
@@ -139,10 +163,23 @@ export function MonthlyCloseWizard({
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [addingPosition, setAddingPosition] = useState(false);
+  // Dívidas declaradas no último fechamento, para avisar quem ficou sem dívida nesta base.
+  const [previousDebt, setPreviousDebt] = useState<DebtSummary | null>(null);
   const [newPositionAccountId, setNewPositionAccountId] = useState(accounts[0]?.id ?? "");
   const [newPositionAmount, setNewPositionAmount] = useState("");
 
   const canEdit = snapshot?.status === "draft";
+
+  // Uma conta pode ter mais de uma linha (ex.: duas caixas): cada linha tem um
+  // índice próprio, usado no rótulo, na conferência e em "copiar saldos".
+  const lineInfo = useMemo(() => accountLineIndexes(snapshot?.positions ?? []), [snapshot]);
+
+  const positionLabel = (position: Position) => {
+    const name = position.account?.name ?? categoryLabels[position.category];
+    const index = lineInfo.indexes.get(position.id);
+    const lines = position.accountId ? lineInfo.linesPerAccount.get(position.accountId) ?? 1 : 1;
+    return lines > 1 && index !== undefined ? `${name} (${index + 1})` : name;
+  };
 
   const personGroups = useMemo(() => {
     if (!snapshot) return [];
@@ -158,7 +195,7 @@ export function MonthlyCloseWizard({
       .sort((a, b) => a.name.localeCompare(b.name, "pt-BR"))
       .map((group) => ({
         ...group,
-        positions: [...group.positions].sort((a, b) => label(a).localeCompare(label(b), "pt-BR")),
+        positions: [...group.positions].sort((a, b) => label(a).localeCompare(label(b), "pt-BR") || byLineOrder(a, b)),
       }));
   }, [snapshot]);
 
@@ -169,16 +206,109 @@ export function MonthlyCloseWizard({
       (item) => (item.status === "closed" || item.status === "revised") && item.periodMonth.slice(0, 10) < current,
     );
     if (!latest) return null;
-    const byAccount = new Map<string, string>();
-    for (const position of latest.positions) {
-      if (position.accountId && !byAccount.has(position.accountId)) byAccount.set(position.accountId, String(position.amount));
+    // Valores do mês anterior por conta, na ordem das linhas (1ª linha → 1ª linha).
+    const byAccount = new Map<string, string[]>();
+    const accountLabels = new Map<string, string>();
+    for (const position of [...latest.positions].sort(byLineOrder)) {
+      if (!position.accountId) continue;
+      byAccount.set(position.accountId, [...(byAccount.get(position.accountId) ?? []), String(position.amount)]);
+      accountLabels.set(position.accountId, `${position.person.name} — ${position.account?.name ?? categoryLabels[position.category]}`);
     }
-    return { periodMonth: latest.periodMonth, label: shortMonth(latest.periodMonth), byAccount };
+    return { periodMonth: latest.periodMonth, label: shortMonth(latest.periodMonth), byAccount, accountLabels };
   }, [snapshots, snapshot, periodMonth]);
+
+  /** Valor do mês anterior na mesma posição de linha (melhor esforço, usado em "copiar saldos"). */
+  const previousLineValue = (position: Position) => {
+    if (!previousReference || !position.accountId) return undefined;
+    return previousReference.byAccount.get(position.accountId)?.[lineInfo.indexes.get(position.id) ?? 0];
+  };
+
+  /**
+   * Valor do mês anterior da MESMA linha — só quando a conta tem o mesmo número
+   * de linhas nos dois meses. Se uma linha foi incluída ou removida, casar pela
+   * ordem apontaria para a linha errada.
+   */
+  const previousValueFor = (position: Position) => {
+    if (!previousReference || !position.accountId) return undefined;
+    const previous = previousReference.byAccount.get(position.accountId);
+    if (!previous || previous.length !== (lineInfo.linesPerAccount.get(position.accountId) ?? 0)) return undefined;
+    return previous[lineInfo.indexes.get(position.id) ?? 0];
+  };
+
+  /** Total da conta no mês anterior (dica quando o número de linhas mudou). */
+  const previousAccountTotal = (accountId: string | null) => {
+    if (!previousReference || !accountId) return undefined;
+    const previous = previousReference.byAccount.get(accountId);
+    return previous ? previous.reduce((sum, value) => sum + Number(value), 0) : undefined;
+  };
+
+  /** Dica da coluna "mês anterior": a mesma linha ou, se as linhas mudaram, o total da conta (na 1ª linha). */
+  const previousHint = (position: Position) => {
+    if (!previousReference) return "—";
+    const sameLine = previousValueFor(position);
+    if (sameLine !== undefined) return `${previousReference.label}: ${currency(Number(sameLine))}`;
+    const total = previousAccountTotal(position.accountId);
+    if (total === undefined || (lineInfo.indexes.get(position.id) ?? 0) !== 0) return "—";
+    return `${previousReference.label} (conta): ${currency(total)}`;
+  };
+
+  /**
+   * Saldos que provavelmente foram esquecidos, conferidos POR CONTA contra o
+   * último fechamento: conta que sumiu, conta zerada, menos linhas com saldo,
+   * ou (com o mesmo número de linhas) uma linha zerada que tinha saldo.
+   */
+  function previousBalanceIssues() {
+    if (!previousReference || !snapshot) return [];
+    const issues: string[] = [];
+    const month = monthName(previousReference.periodMonth);
+    for (const [accountId, values] of previousReference.byAccount) {
+      const previous = values.map(Number);
+      const previousTotal = previous.reduce((sum, value) => sum + value, 0);
+      const previousWithBalance = previous.filter((value) => value !== 0).length;
+      if (previousTotal === 0 && previousWithBalance === 0) continue;
+      const lines = snapshot.positions.filter((position) => position.accountId === accountId);
+      const current = lines.map((position) => Number(amounts[position.id]));
+      const currentTotal = current.reduce((sum, value) => sum + value, 0);
+      const label = previousReference.accountLabels.get(accountId) ?? "Conta";
+      if (lines.length === 0) {
+        issues.push(`${label}: tinha ${currency(previousTotal)} em ${month} e não está neste fechamento`);
+      } else if (currentTotal === 0) {
+        issues.push(`${label}: está em R$ 0 (tinha ${currency(previousTotal)} em ${month})`);
+      } else if (lines.length === previous.length) {
+        lines.forEach((position) => {
+          const before = previousValueFor(position);
+          if (Number(amounts[position.id]) === 0 && before !== undefined && Number(before) !== 0) {
+            issues.push(`${position.person.name} — ${positionLabel(position)}: está em R$ 0 (tinha ${currency(Number(before))} em ${month})`);
+          }
+        });
+      } else {
+        const currentWithBalance = current.filter((value) => value !== 0).length;
+        if (currentWithBalance < previousWithBalance) {
+          issues.push(
+            `${label}: ${previousWithBalance} linhas com saldo em ${month} (${currency(previousTotal)}), agora ${currentWithBalance} (${currency(currentTotal)})`,
+          );
+        }
+      }
+    }
+    return issues;
+  }
 
   useEffect(() => {
     void loadSnapshots();
   }, []);
+
+  useEffect(() => {
+    const previousPeriod = previousReference?.periodMonth?.slice(0, 7);
+    if (!previousPeriod) {
+      setPreviousDebt(null);
+      return;
+    }
+    const controller = new AbortController();
+    fetch(`/api/debts/summary?period_month=${previousPeriod}`, { signal: controller.signal })
+      .then(async (response) => (response.ok ? setPreviousDebt((await response.json()) as DebtSummary) : setPreviousDebt(null)))
+      .catch(() => undefined);
+    return () => controller.abort();
+  }, [previousReference?.periodMonth]);
 
   // Permite chegar com um snapshot pré-selecionado (ex.: "Criar revisão" no Histórico).
   useEffect(() => {
@@ -366,7 +496,11 @@ export function MonthlyCloseWizard({
 
   async function deleteDraft() {
     if (!snapshot || snapshot.status !== "draft") return;
-    const confirmed = window.confirm("Excluir este rascunho? Os saldos informados nele serão descartados.");
+    const confirmed = window.confirm(
+      snapshot.revisionNumber > 1
+        ? "Excluir esta revisão? Os saldos informados nela serão descartados e o fechamento anterior volta a valer. Alterações feitas em Cartão e dívidas durante a revisão continuam gravadas."
+        : "Excluir este rascunho? Os saldos informados nele serão descartados.",
+    );
     if (!confirmed) return;
     setLoading(true);
     setMessage(null);
@@ -388,14 +522,27 @@ export function MonthlyCloseWizard({
     setAmounts((current) => {
       const next = { ...current };
       for (const position of snapshot.positions) {
-        if (position.accountId && previousReference.byAccount.has(position.accountId)) {
-          next[position.id] = previousReference.byAccount.get(position.accountId)!;
-        }
+        const previous = previousLineValue(position);
+        if (previous !== undefined) next[position.id] = previous;
       }
       return next;
     });
     setPreview(null);
-    setMessage(`Saldos de ${monthName(previousReference.periodMonth)} copiados. Confira, ajuste e salve.`);
+    // Linhas do mês anterior que este rascunho não tem não podem sumir em silêncio.
+    const leftovers: string[] = [];
+    for (const [accountId, values] of previousReference.byAccount) {
+      const linesHere = lineInfo.linesPerAccount.get(accountId) ?? 0;
+      values.slice(linesHere).forEach((value, offset) => {
+        const lineNumber = linesHere + offset + 1;
+        const label = previousReference.accountLabels.get(accountId) ?? "Conta";
+        leftovers.push(`${label}${values.length > 1 ? ` (${lineNumber})` : ""}: ${currency(Number(value))}`);
+      });
+    }
+    setMessage(
+      leftovers.length > 0
+        ? `Saldos de ${monthName(previousReference.periodMonth)} copiados. Atenção: ${leftovers.length === 1 ? "esta linha não tem correspondente" : "estas linhas não têm correspondente"} neste rascunho — ${leftovers.join("; ")}. Use "Adicionar posição avulsa" se ainda existirem.`
+        : `Saldos de ${monthName(previousReference.periodMonth)} copiados. Confira, ajuste e salve.`,
+    );
   }
 
   async function persistPositionsAndPreview() {
@@ -427,6 +574,25 @@ export function MonthlyCloseWizard({
 
   async function savePositions(options?: { goToStep?: number }) {
     if (!snapshot) return;
+    // Campo vazio não pode virar R$ 0 em silêncio: um saldo esquecido derrubaria o patrimônio do mês.
+    const blanks = snapshot.positions.filter((position) => String(amounts[position.id] ?? "").trim() === "");
+    if (blanks.length > 0) {
+      const names = blanks.map((position) => `${position.person.name} — ${positionLabel(position)}`).join(", ");
+      setMessage(`Preencha os saldos em branco (use 0 se a conta estiver zerada): ${names}.`);
+      return;
+    }
+    // Saldo que provavelmente foi esquecido (o rascunho nasce com R$ 0): pede
+    // confirmação explícita — um duplo clique não passa por cima dela.
+    const issues = previousBalanceIssues();
+    if (issues.length > 0) {
+      const confirmed = window.confirm(
+        `Confira estes saldos antes de salvar:\n\n• ${issues.join("\n• ")}\n\nSalvar mesmo assim?`,
+      );
+      if (!confirmed) {
+        setMessage(`Saldos não salvos. Confira: ${issues.join("; ")}.`);
+        return;
+      }
+    }
     setLoading(true);
     setMessage(null);
     try {
@@ -501,6 +667,13 @@ export function MonthlyCloseWizard({
 
   async function closeSnapshot() {
     if (!snapshot) return;
+    if (missingDebtPeople.length > 0) {
+      const names = missingDebtPeople.map((person) => person.name).join(" e ");
+      const confirmed = window.confirm(
+        `Nenhuma dívida de cartão declarada nesta base para ${names}. A dívida vai entrar como zero e o patrimônio fica maior. Fechar mesmo assim?`,
+      );
+      if (!confirmed) return;
+    }
     setLoading(true);
     setMessage(null);
     try {
@@ -531,6 +704,16 @@ export function MonthlyCloseWizard({
   }
 
   const currentMonthName = monthName(periodMonth);
+
+  // Fechar sem declarar as dívidas da base zera a dívida dessa pessoa e infla o
+  // patrimônio: avisa quem tinha dívida no último fechamento e não tem nesta base.
+  const personNames = new Map(accounts.map((account) => [account.personId, account.person.name]));
+  const missingDebtPeople =
+    review && previousDebt
+      ? Object.entries(previousDebt.byPerson)
+          .filter(([personId, values]) => values.nominalTotal > 0 && !((review.debt.byPerson?.[personId]?.nominalTotal ?? 0) > 0))
+          .map(([personId, values]) => ({ name: personNames.get(personId) ?? "Pessoa", previousPresentValue: values.presentValueTotal }))
+      : [];
 
   return (
     <div>
@@ -601,7 +784,7 @@ export function MonthlyCloseWizard({
                       className="grid grid-cols-[1fr_140px] items-center gap-3 border-b border-edge-hair py-3 last:border-b-0 sm:grid-cols-[1fr_170px_110px_32px]"
                     >
                       <div className="min-w-0">
-                        <div className="truncate text-[13px] font-medium text-body">{position.account?.name ?? categoryLabels[position.category]}</div>
+                        <div className="truncate text-[13px] font-medium text-body">{positionLabel(position)}</div>
                         <div className="text-[11px] text-faint">{categoryLabels[position.category]}</div>
                       </div>
                       <input
@@ -610,20 +793,18 @@ export function MonthlyCloseWizard({
                         type="number"
                         step="0.01"
                         disabled={!canEdit}
-                        aria-label={`Saldo de ${position.person.name} — ${position.account?.name ?? categoryLabels[position.category]}`}
+                        aria-label={`Saldo de ${position.person.name} — ${positionLabel(position)}`}
                         className="w-full rounded-lg border border-edge bg-surface-2 px-3 py-2 text-right text-sm font-semibold tabular-nums text-snow focus:border-gold focus:outline-none disabled:opacity-60"
                       />
                       <span className="hidden text-right text-[11px] tabular-nums text-faint sm:block">
-                        {previousReference && position.accountId && previousReference.byAccount.has(position.accountId)
-                          ? `${previousReference.label}: ${currency(Number(previousReference.byAccount.get(position.accountId)))}`
-                          : "—"}
+                        {previousHint(position)}
                       </span>
                       {canEdit ? (
                         <button
                           type="button"
                           onClick={() => void deletePosition(position.id)}
                           disabled={loading}
-                          aria-label={`Remover posição ${position.account?.name ?? categoryLabels[position.category]}`}
+                          aria-label={`Remover posição ${positionLabel(position)}`}
                           title="Remover posição"
                           className="focus-ring hidden h-8 w-8 items-center justify-center rounded-lg text-faint hover:bg-elevated hover:text-negative-text disabled:opacity-50 sm:inline-flex"
                         >
@@ -776,6 +957,15 @@ export function MonthlyCloseWizard({
               ) : (
                 <p className="mt-4 text-sm text-faint">Carregando a revisão de dívidas…</p>
               )}
+              {missingDebtPeople.length > 0 && previousReference ? (
+                <p className="mt-4 rounded-[10px] border border-gold/35 bg-gold/[0.06] px-3.5 py-3 text-xs leading-[18px] text-gold-light">
+                  Nenhuma dívida declarada nesta base para{" "}
+                  {missingDebtPeople
+                    .map((person) => `${person.name} (tinha ${currency(person.previousPresentValue)} a valor presente em ${monthName(previousReference.periodMonth)})`)
+                    .join(" e ")}
+                  . Sem isso, a dívida entra como zero e o patrimônio fica maior do que é — registre as faturas em "Ajustar dívidas" antes de fechar.
+                </p>
+              ) : null}
             </section>
 
             <section className="rounded-[14px] border border-edge bg-surface p-6">
@@ -799,10 +989,20 @@ export function MonthlyCloseWizard({
                     <Metric label="Despesa orçada" value={currency(review.budget.expenseTotal)} />
                     <Metric label="Sobra orçada" value={currency(review.budget.monthlySurplus)} tone={review.budget.monthlySurplus >= 0 ? "positive" : "negative"} />
                   </div>
-                  {review.budget.cardMovingAverageMonths ? (
+                  {review.budget.cardMovingAverageApplied ? (
                     <p className="mt-3 text-xs text-faint">
                       O cartão entra no orçamento por {currency(review.budget.cardMovingAverageAppliedExpense)}, pela média móvel de{" "}
-                      {review.budget.cardMovingAverageMonths} mês(es).
+                      {review.budget.cardMovingAverageMonths} {review.budget.cardMovingAverageMonths === 1 ? "mês" : "meses"}
+                      {review.budget.cardMovingAverageAppliedExpense < review.budget.cardMovingAverageExpense
+                        ? " (o restante já está coberto por itens do orçamento)"
+                        : ""}
+                      .
+                    </p>
+                  ) : review.budget.cardMovingAverageMonths ? (
+                    <p className="mt-3 text-xs text-faint">
+                      O cartão entra pelos itens do orçamento. Média móvel das faturas, só para referência:{" "}
+                      {currency(review.budget.cardMovingAverageExpense)} ({review.budget.cardMovingAverageMonths}{" "}
+                      {review.budget.cardMovingAverageMonths === 1 ? "mês" : "meses"}).
                     </p>
                   ) : null}
                 </>

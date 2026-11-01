@@ -3,6 +3,7 @@ import { errorResponse, json } from "@/lib/api";
 import { prisma } from "@/lib/prisma";
 import { audit } from "@/server/audit";
 import { upsertManualSelicRate } from "@/server/interest-rates";
+import { metricValuesForGoals } from "@/server/goal-progress";
 import { calculateSnapshotMetrics, rebuildGoalProgress } from "@/server/metrics";
 
 export async function POST(_request: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -27,15 +28,7 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
       });
       return { updated, interestRateChange };
     });
-    await rebuildGoalProgress(householdId, updated.periodMonth, {
-      meses_de_reserva: metrics.kpis.reserveMonths,
-      invest_ativos: metrics.kpis.investmentsToAssets,
-      divida_ativos: metrics.kpis.debtToAssets,
-      tx_poupanca: metrics.kpis.patrimonialSavingsRate,
-      pl_total: metrics.kpis.netWorth,
-      invest_total: metrics.kpis.investmentsTotal,
-      caixa_total: metrics.kpis.cashTotal,
-    });
+    await rebuildGoalProgress(householdId, updated.periodMonth, metricValuesForGoals(metrics.kpis));
     await audit({ userId, entityType: "monthly_snapshot", entityId: id, action: "close", oldValue: current, newValue: updated });
     if (interestRateChange.changed) {
       await audit({

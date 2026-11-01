@@ -2,8 +2,12 @@ import fs from "node:fs/promises";
 import { createRequire } from "node:module";
 import path from "node:path";
 import type * as XLSXModule from "xlsx";
+import { cardKey, goalStatusFor, isCardInvoiceItemName } from "@finance/financial-calculations";
 import { prisma } from "@/lib/prisma";
 import { asMonthStart, formatPeriod, parseMonthOrNull } from "@/lib/date";
+import { formatLooseNumber } from "@/lib/number-br";
+import { audit } from "@/server/audit";
+import { GOAL_METRIC_KEYS, metricValuesForGoals } from "@/server/goal-progress";
 import { calculateSnapshotMetrics, rebuildGoalProgress } from "@/server/metrics";
 
 const require = createRequire(import.meta.url);
@@ -45,7 +49,7 @@ const accountMap = [
   { person: "Tatiane", account: "Investimentos", category: "investment" as const, column: 10 },
 ];
 
-export async function runExcelImport(input: { householdId: string; filePath: string }) {
+export async function runExcelImport(input: { householdId: string; filePath: string; userId?: string | null }) {
   await fs.access(input.filePath);
 
   const job = await prisma.importJob.create({
@@ -76,10 +80,36 @@ export async function runExcelImport(input: { householdId: string; filePath: str
           people.flatMap((person) => person.accounts.map((account) => [`${person.name}:${account.name}`, account] as const)),
         );
 
+        // Faturas da planilha substituem as existentes pela CHAVE (pessoa, cartão,
+        // base, vencimento), qualquer que seja a origem: uma fatura importada e
+        // depois editada (source "adjustment") seria recriada e contada em dobro.
+        const parsedDebts = parseDebtCashflows(debtRows, peopleByName);
+        const debtKey = (flow: { personId: string; cardName: string; invoiceMonth: Date; paymentMonth: Date }) =>
+          JSON.stringify([flow.personId, cardKey(flow.cardName), formatPeriod(flow.invoiceMonth), formatPeriod(flow.paymentMonth)]);
+        const importedKeys = new Set(parsedDebts.map((flow) => debtKey({ ...flow, cardName: "Cartão principal" })));
+        const existingDebts = await tx.debtCashflow.findMany({ where: { householdId: input.householdId } });
+        const replacedDebts = existingDebts.filter((flow) => flow.source === "import" || importedKeys.has(debtKey(flow)));
+        if (replacedDebts.length) {
+          await tx.debtCashflow.deleteMany({ where: { id: { in: replacedDebts.map((flow) => flow.id) } } });
+        }
+        const [budgetItemsRemoved, goalsRemoved] = await Promise.all([
+          tx.budgetItem.findMany({ where: { householdId: input.householdId } }),
+          tx.goal.findMany({ where: { householdId: input.householdId } }),
+        ]);
         await tx.budgetItem.deleteMany({ where: { householdId: input.householdId } });
         await tx.goalProgressSnapshot.deleteMany({ where: { goal: { householdId: input.householdId } } });
         await tx.goal.deleteMany({ where: { householdId: input.householdId } });
-        await tx.debtCashflow.deleteMany({ where: { householdId: input.householdId, source: "import" } });
+        await audit(
+          {
+            userId: input.userId ?? null,
+            entityType: "import_job",
+            entityId: job.id,
+            action: "import",
+            oldValue: { debtCashflowsReplaced: replacedDebts, budgetItemsRemoved, goalsRemoved },
+            reason: "Importação da planilha: substitui os meses da planilha, o orçamento e as metas.",
+          },
+          tx,
+        );
 
         for (const row of sourceRows) {
           const snapshot = await tx.monthlySnapshot.upsert({
@@ -142,7 +172,7 @@ export async function runExcelImport(input: { householdId: string; filePath: str
           });
         }
 
-        const debtCashflows = parseDebtCashflows(debtRows, peopleByName);
+        const debtCashflows = parsedDebts;
         if (debtCashflows.length) {
           await tx.debtCashflow.createMany({
             data: debtCashflows.map((flow) => ({
@@ -158,7 +188,12 @@ export async function runExcelImport(input: { householdId: string; filePath: str
           });
         }
 
-        const budgetItems = parseBudgetItems(budgetRows, peopleByName, earliestMonth, input.householdId);
+        // A "fatura cartão (média 12m)" da planilha é uma foto da média na data
+        // do arquivo. Ela vale até o último mês importado; depois disso o app
+        // usa a própria média móvel das faturas declaradas (sem congelar).
+        const budgetItems = parseBudgetItems(budgetRows, peopleByName, earliestMonth, input.householdId).map((item) =>
+          isCardAverageItem(item) ? { ...item, endMonth: latestMonth } : item,
+        );
         if (budgetItems.length) await tx.budgetItem.createMany({ data: budgetItems });
 
         const goals = parseGoals(goalRows, input.householdId);
@@ -170,7 +205,7 @@ export async function runExcelImport(input: { householdId: string; filePath: str
               periodMonth: latestMonth,
               currentValue: goal.currentValue,
               progressPct: goal.progressPct,
-              status: goal.progressPct >= 1 ? "achieved" : goal.progressPct < 0.5 ? "attention" : "in_progress",
+              status: goalStatusFor(goal.progressPct, goal.goal.horizon),
             },
           });
         }
@@ -368,8 +403,14 @@ function budgetItem(householdId: string, personId: string | null, name: string, 
     amountMonthly,
     recurrence: "monthly" as const,
     startMonth,
+    endMonth: null as Date | null,
     isActive: true,
   };
+}
+
+/** Item de orçamento que representa a média da fatura do cartão (mesma regra de isCardBudgetItem). */
+function isCardAverageItem(item: { kind: string; name: string }) {
+  return item.kind === "variable_expense" && isCardInvoiceItemName(item.name);
 }
 
 export function parseGoals(rows: SheetRow[], householdId: string) {
@@ -408,22 +449,28 @@ export function parseGoals(rows: SheetRow[], householdId: string) {
     const isTargetNumeric = isFiniteNumber(target);
     const operator = inferGoalOperator(title, indicator, target);
     const targetMonth = parseMonthOrNull(row[6] instanceof Date ? row[6] : toText(row[6]));
+    const key = metricKey(indicator);
+    // Metas numéricas sem métrica do app (ex.: renda líquida) guardam o valor
+    // atual da planilha — antes ele era perdido e a meta virava 0%.
+    const isAppMetric = (GOAL_METRIC_KEYS as readonly string[]).includes(key);
+    const manualCurrentValue =
+      operator === "manual" ? goalCellText(current) : !isAppMetric && isFiniteNumber(current) ? goalCellText(current) : null;
 
     goals.push({
       goal: {
         householdId,
         title,
         horizon,
-        metricKey: metricKey(indicator),
+        metricKey: key,
         targetValueDecimal: isTargetNumeric ? toNumber(target) : null,
         targetValueText: isTargetNumeric ? null : toText(target),
         targetDate: targetMonth ? formatPeriod(targetMonth) : toText(row[6]) || null,
         comparisonOperator: operator,
         riskCapValue: operator === "less_or_equal" && isTargetNumeric ? toNumber(target) * 2 : null,
-        manualCurrentValue: operator === "manual" ? toText(current) || String(toNumber(current)) : null,
+        manualCurrentValue,
         notes: toText(row[7]) || null,
       },
-      currentValue: toText(current) || String(toNumber(current)),
+      currentValue: goalCellText(current),
       progressPct,
     });
   }
@@ -479,15 +526,7 @@ async function calculateMetricsForGoalRebuild(householdId: string, periodMonth: 
     orderBy: { revisionNumber: "desc" },
   });
   const metrics = await calculateSnapshotMetrics(householdId, snapshot.id);
-  return {
-    meses_de_reserva: metrics.kpis.reserveMonths,
-    invest_ativos: metrics.kpis.investmentsToAssets,
-    divida_ativos: metrics.kpis.debtToAssets,
-    tx_poupanca: metrics.kpis.patrimonialSavingsRate,
-    pl_total: metrics.kpis.netWorth,
-    invest_total: metrics.kpis.investmentsTotal,
-    caixa_total: metrics.kpis.cashTotal,
-  };
+  return metricValuesForGoals(metrics.kpis);
 }
 
 function inferGoalOperator(title: string, indicator: string, target: unknown) {
@@ -536,6 +575,12 @@ function isFiniteNumber(value: unknown) {
   if (typeof value === "number") return Number.isFinite(value);
   if (typeof value === "string" && value.trim() !== "") return Number.isFinite(Number(value.replace(",", ".")));
   return false;
+}
+
+/** Valor de célula para texto de meta: números no formato do app ("1,125"), nunca ambíguo. */
+function goalCellText(value: unknown) {
+  if (typeof value === "number" && Number.isFinite(value)) return formatLooseNumber(value);
+  return toText(value) || formatLooseNumber(toNumber(value));
 }
 
 function toText(value: unknown) {

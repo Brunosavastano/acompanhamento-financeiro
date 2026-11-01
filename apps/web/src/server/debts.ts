@@ -1,4 +1,5 @@
 import type { DebtCashflow, Prisma } from "@prisma/client";
+import { cardKey } from "@finance/financial-calculations";
 import { prisma } from "@/lib/prisma";
 import { audit } from "@/server/audit";
 
@@ -53,18 +54,21 @@ export async function assertDebtBaseEditable(householdId: string, invoiceMonth: 
  * métricas tratam como aditiva (nunca evicta declarações de outras bases).
  */
 export async function upsertDeclaredDebt(tx: PrismaLike, input: DeclaredDebtInput): Promise<DeclaredDebtResult> {
+  // O mesmo cartão pode estar gravado com ou sem acento ("Cartao"/"Cartão"):
+  // a comparação usa a identidade normalizada, não o texto exato.
   const replaced =
     input.mode === "replace"
-      ? await tx.debtCashflow.findMany({
-          where: {
-            householdId: input.householdId,
-            personId: input.personId,
-            cardName: input.cardName,
-            invoiceMonth: input.invoiceMonth,
-            paymentMonth: input.paymentMonth,
-          },
-          orderBy: { createdAt: "asc" },
-        })
+      ? (
+          await tx.debtCashflow.findMany({
+            where: {
+              householdId: input.householdId,
+              personId: input.personId,
+              invoiceMonth: input.invoiceMonth,
+              paymentMonth: input.paymentMonth,
+            },
+            orderBy: { createdAt: "asc" },
+          })
+        ).filter((flow) => cardKey(flow.cardName) === cardKey(input.cardName))
       : [];
 
   if (replaced.length) {

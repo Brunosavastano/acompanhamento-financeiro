@@ -7,7 +7,7 @@ import { audit } from "@/server/audit";
 import { addMonths, calculateBudgetProjection, toMoneyNumber, toNumber } from "@finance/financial-calculations";
 import { toDecimalNumber } from "@/lib/format";
 import { assertPersonInHousehold } from "@/server/guards";
-import { mapCardExpensesLatestBase } from "@/server/metrics";
+import { mapRealizedCardExpenses } from "@/server/metrics";
 
 export async function GET(request: Request) {
   try {
@@ -45,7 +45,7 @@ export async function GET(request: Request) {
         isActive: item.isActive,
       })),
       periodMonth: period,
-      cardExpenses: mapCardExpensesLatestBase(cardCashflows),
+      cardExpenses: mapRealizedCardExpenses(cardCashflows),
     });
     return json({
       items,

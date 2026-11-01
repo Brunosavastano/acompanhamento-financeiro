@@ -8,8 +8,11 @@ import {
   calculateMovingAverageExpense,
   calculatePatrimonyMetrics,
   calculateRequiredCagr,
+  cardKey,
   dedupeLatestInvoiceBase,
+  goalStatusFor,
   presentValue,
+  realizedInvoiceExpenses,
   toMoneyNumber,
 } from "./index";
 
@@ -187,6 +190,123 @@ describe("financial calculations", () => {
       { personId: "bruno", cardName: "Cartão principal", invoiceMonth: "2026-10-01", paymentMonth: "2026-11-01", amount: 2200, source: "adjustment" },
     ]);
     expect(withNewerDeclaration.map((flow) => flow.amount)).toEqual([100, 2200]);
+  });
+
+  it("treats card names that differ only by accent, case or spacing as the same card", () => {
+    expect(cardKey("Cartao principal")).toBe(cardKey("Cartão principal"));
+    expect(cardKey("  CARTÃO   Principal ")).toBe(cardKey("Cartão principal"));
+    expect(cardKey("Outro cartão")).not.toBe(cardKey("Cartão principal"));
+
+    // Caso real de produção: projeção importada como "Cartao principal" (sem til)
+    // e re-declarada pela UI como "Cartão principal" — não pode somar em dobro.
+    const deduped = dedupeLatestInvoiceBase([
+      { personId: "bruno", cardName: "Cartao principal", invoiceMonth: "2026-05-01", paymentMonth: "2026-07-01", amount: 3884.36, source: "import" },
+      { personId: "bruno", cardName: "Cartão principal", invoiceMonth: "2026-07-01", paymentMonth: "2026-07-01", amount: 27440.1, source: "manual_matrix" },
+    ]);
+    expect(deduped.map((flow) => flow.amount)).toEqual([27440.1]);
+  });
+
+  it("counts only the invoice declared in its own month as realized card spending", () => {
+    const realized = realizedInvoiceExpenses([
+      { personId: "bruno", invoiceMonth: "2026-09-01", paymentMonth: "2026-09-01", amount: 15356.88 },
+      // projeção de outubro feita em setembro: não é gasto realizado de outubro
+      { personId: "bruno", invoiceMonth: "2026-09-01", paymentMonth: "2026-10-01", amount: 7042.32 },
+      { personId: "tatiane", invoiceMonth: "2026-11-01", paymentMonth: "2026-11-01", amount: 8349.2 },
+    ]);
+    expect(realized).toEqual([
+      { personId: "bruno", periodMonth: "2026-09-01", amount: 15356.88 },
+      { personId: "tatiane", periodMonth: "2026-11-01", amount: 8349.2 },
+    ]);
+
+    // Mês sem declaração própria (outubro) fica fora; cada pessoa tem a sua média
+    // (Entradas!C31 e D31 da planilha) e o total é a soma (E31 = C31 + D31).
+    const average = calculateMovingAverageExpense(realized, "2026-11-01", 12);
+    expect(average.monthsUsed).toBe(2);
+    expect(toMoneyNumber(average.averageMonthly)).toBe(23706.08);
+  });
+
+  it("averages card spending per person, ignoring a person's months without invoice (AVERAGEIF <>0)", () => {
+    const average = calculateMovingAverageExpense(
+      [
+        { personId: "bruno", periodMonth: "2026-07-01", amount: 1000 },
+        { personId: "bruno", periodMonth: "2026-08-01", amount: 1000 },
+        { personId: "bruno", periodMonth: "2026-09-01", amount: 1000 },
+        { personId: "tatiane", periodMonth: "2026-07-01", amount: 500 },
+        { personId: "tatiane", periodMonth: "2026-09-01", amount: 500 },
+        { personId: "tatiane", periodMonth: "2026-08-01", amount: 0 },
+      ],
+      "2026-09-01",
+      12,
+    );
+    // Por família daria (1500 + 1000 + 1500) / 3 = 1333,33 — diluindo a Tatiane com um zero.
+    expect(toMoneyNumber(average.averageMonthly)).toBe(1500);
+    expect(average.monthsUsed).toBe(3);
+    expect(toMoneyNumber(average.total)).toBe(4000);
+  });
+
+  it("normalizes the patrimonial savings rate when a month was skipped", () => {
+    const consecutive = calculatePatrimonyMetrics({
+      positions: [{ personId: "bruno", category: "cash", amount: 1000 }],
+      debtPvTotal: 0,
+      previousNetWorth: 800,
+      incomeTotal: 1000,
+      expenseTotal: 500,
+    });
+    const skipped = calculatePatrimonyMetrics({
+      positions: [{ personId: "bruno", category: "cash", amount: 1000 }],
+      debtPvTotal: 0,
+      previousNetWorth: 800,
+      incomeTotal: 1000,
+      expenseTotal: 500,
+      monthsSincePrevious: 2,
+    });
+    expect(toMoneyNumber(skipped.monthlyVariation)).toBe(200);
+    expect(consecutive.patrimonialSavingsRate.toFixed(2)).toBe("0.20");
+    expect(skipped.patrimonialSavingsRate.toFixed(2)).toBe("0.10");
+  });
+
+  it("never throws on non-numeric goal values", () => {
+    expect(calculateGoalProgress({ comparisonOperator: "greater_or_equal", currentValue: 50, targetValue: "1.000.000" }).toNumber()).toBe(0);
+    expect(calculateGoalProgress({ comparisonOperator: "greater_or_equal", currentValue: "Estudando", targetValue: 10 }).toNumber()).toBe(0);
+    expect(calculateGoalProgress({ comparisonOperator: "manual", currentValue: "Aprovado", targetValue: "Level II" }).toNumber()).toBe(0);
+  });
+
+  it("classifies goal status by horizon like the spreadsheet", () => {
+    expect(goalStatusFor(1, "long")).toBe("achieved");
+    expect(goalStatusFor(0.75, "short")).toBe("in_progress");
+    expect(goalStatusFor(0.55, "short")).toBe("attention");
+    expect(goalStatusFor(0.55, "medium")).toBe("in_progress");
+    expect(goalStatusFor(0.27, "medium")).toBe("long_term");
+    expect(goalStatusFor(0.0003, "long")).toBe("long_term");
+    expect(goalStatusFor(0.12, "long")).toBe("in_progress");
+  });
+
+  it("applies the card average only for people without their own card item", () => {
+    const cardExpenses = [
+      { personId: "bruno", periodMonth: "2026-10-01", amount: 9000 },
+      { personId: "bruno", periodMonth: "2026-11-01", amount: 11000 },
+      { personId: "tatiane", periodMonth: "2026-10-01", amount: 6000 },
+      { personId: "tatiane", periodMonth: "2026-11-01", amount: 8000 },
+    ];
+    // Item fixo só do Bruno: a média da Tatiane (7.000) continua entrando.
+    const partial = calculateBudgetProjection({
+      items: [{ personId: "bruno", name: "Fatura cartão (média 12m)", kind: "variable_expense", amountMonthly: 9828.34, startMonth: "2025-04-01" }],
+      periodMonth: "2026-11-01",
+      cardExpenses,
+    });
+    expect(toMoneyNumber(partial.cardMovingAverageExpense)).toBe(17000);
+    expect(toMoneyNumber(partial.cardMovingAverageAppliedExpense)).toBe(7000);
+    expect(toMoneyNumber(partial.variableExpenseTotal)).toBe(16828.34);
+    expect(partial.cardMovingAverageApplied).toBe(true);
+
+    // Uma "Anuidade do cartão" é despesa comum: não desliga a média.
+    const withFee = calculateBudgetProjection({
+      items: [{ personId: null, name: "Anuidade do cartão", kind: "variable_expense", amountMonthly: 45, startMonth: "2025-04-01" }],
+      periodMonth: "2026-11-01",
+      cardExpenses,
+    });
+    expect(toMoneyNumber(withFee.cardMovingAverageAppliedExpense)).toBe(17000);
+    expect(toMoneyNumber(withFee.variableExpenseTotal)).toBe(17045);
   });
 
   it("calculates goal progress and CAGR", () => {
