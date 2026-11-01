@@ -9,7 +9,6 @@ import {
   BarChart,
   CartesianGrid,
   Cell,
-  ReferenceDot,
   ReferenceLine,
   ResponsiveContainer,
   Tooltip,
@@ -26,25 +25,25 @@ const POSITIVE = "#5BCB8D";
 const NEGATIVE = "#E0688F";
 const INFO = "#6E9BD8";
 const STEEL = "#3A4A6B";
-const GRID = "#182238";
-const TICK = { fill: "#5C687F", fontSize: 12 };
+export const GRID = "#182238";
+export const TICK = { fill: "#5C687F", fontSize: 12 };
 
-const tooltipContentStyle: CSSProperties = {
+export const tooltipContentStyle: CSSProperties = {
   backgroundColor: "#0B1120",
   border: "1px solid #1F2A42",
   borderRadius: 8,
   color: "#EEF2FA",
   fontSize: 12,
 };
-const tooltipLabelStyle: CSSProperties = { color: "#8B96AD", fontWeight: 600 };
+export const tooltipLabelStyle: CSSProperties = { color: "#8B96AD", fontWeight: 600 };
 const tooltipItemStyle: CSSProperties = { color: "#EEF2FA" };
 
-function brl0(value: number) {
+export function brl0(value: number) {
   return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 }).format(value);
 }
 
 /** "2024-10" → "out/24" */
-function monthShort(month: string) {
+export function monthShort(month: string) {
   const [year, m] = month.split("-").map(Number);
   const label = new Intl.DateTimeFormat("pt-BR", { month: "short", timeZone: "UTC" })
     .format(new Date(Date.UTC(year, m - 1, 1)))
@@ -132,7 +131,7 @@ const WINDOWS = [
   { key: "all", label: "Tudo" },
 ] as const;
 
-type WindowKey = (typeof WINDOWS)[number]["key"];
+export type WindowKey = (typeof WINDOWS)[number]["key"];
 
 export function ChartWindowToggle({
   value,
@@ -157,76 +156,6 @@ export function ChartWindowToggle({
         </button>
       ))}
     </div>
-  );
-}
-
-export function EvolutionPanel({ data }: { data: Point[] }) {
-  const [window, setWindow] = useState<WindowKey>("12");
-  const visible = window === "all" ? data : data.slice(-Number(window));
-
-  return (
-    <section className="min-w-0 rounded-[14px] border border-edge bg-surface p-6">
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <h2 className="font-display text-lg font-normal text-snow">Evolução do patrimônio</h2>
-        <ChartWindowToggle value={window} onChange={setWindow} />
-      </div>
-      <div className="mt-4 h-[280px]">
-        <ResponsiveContainer width="100%" height="100%">
-          <AreaChart data={visible} margin={{ top: 8, right: 12, bottom: 0, left: 0 }}>
-            <defs>
-              <linearGradient id="evoFill" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor={GOLD} stopOpacity={0.22} />
-                <stop offset="100%" stopColor={GOLD} stopOpacity={0} />
-              </linearGradient>
-            </defs>
-            <CartesianGrid stroke={GRID} strokeDasharray="4 6" vertical={false} />
-            <XAxis
-              dataKey="month"
-              tick={TICK}
-              tickLine={false}
-              axisLine={{ stroke: GRID }}
-              tickFormatter={monthShort}
-              interval={visible.length > 8 ? 1 : 0}
-            />
-            <YAxis
-              tick={TICK}
-              tickLine={false}
-              axisLine={false}
-              width={64}
-              domain={[(dataMin: number) => dataMin * 0.98, (dataMax: number) => dataMax * 1.01]}
-              tickFormatter={(value: number) => `${Math.round(value / 1000)} mil`}
-            />
-            <Tooltip
-              contentStyle={tooltipContentStyle}
-              labelStyle={tooltipLabelStyle}
-              itemStyle={tooltipItemStyle}
-              formatter={(value) => [currency(Number(value)), "Patrimônio"]}
-              labelFormatter={(label) => monthShort(String(label))}
-            />
-            <Area
-              type="linear"
-              dataKey="value"
-              stroke={GOLD}
-              strokeWidth={2.5}
-              fill="url(#evoFill)"
-              dot={lastPointDot(visible.length)}
-              activeDot={{ r: 4.5, fill: GOLD_LIGHT, stroke: "none" }}
-              isAnimationActive={false}
-            />
-            {visible.length > 0 ? (
-              <ReferenceDot
-                x={visible[visible.length - 1].month}
-                y={visible[visible.length - 1].value}
-                r={0}
-                fill="none"
-                stroke="none"
-                label={<ChipLabel text={brl0(visible[visible.length - 1].value)} anchor="point" />}
-              />
-            ) : null}
-          </AreaChart>
-        </ResponsiveContainer>
-      </div>
-    </section>
   );
 }
 

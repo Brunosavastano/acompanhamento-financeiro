@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
   calculateBudgetMetrics,
   calculateBudgetProjection,
+  calculateDebtEvolution,
   calculateDebtMetrics,
+  calculateDebtOutlook,
   calculateMonthlyInvoiceMetrics,
   calculateGoalProgress,
   calculateMovingAverageExpense,
@@ -19,6 +21,65 @@ import {
 describe("financial calculations", () => {
   it("calculates present value with Selic converted to monthly rate", () => {
     expect(toMoneyNumber(presentValue(1000, 12, 0.15))).toBe(869.57);
+  });
+
+  it("tracks card debt month by month with the paid + new bridge", () => {
+    const flows = [
+      // Setembro: fatura de set 1000, parcelas futuras out 600 e nov 400.
+      { personId: "bruno", invoiceMonth: "2026-09-01", paymentMonth: "2026-09-01", amount: 1000 },
+      { personId: "bruno", invoiceMonth: "2026-09-01", paymentMonth: "2026-10-01", amount: 600 },
+      { personId: "bruno", invoiceMonth: "2026-09-01", paymentMonth: "2026-11-01", amount: 400 },
+      // Novembro (outubro pulado): fatura de nov 900, dez 500, jan 300.
+      { personId: "bruno", invoiceMonth: "2026-11-01", paymentMonth: "2026-11-01", amount: 900 },
+      { personId: "bruno", invoiceMonth: "2026-11-01", paymentMonth: "2026-12-01", amount: 500 },
+      { personId: "bruno", invoiceMonth: "2026-11-01", paymentMonth: "2027-01-01", amount: 300 },
+      // Tatiane só declarou em setembro.
+      { personId: "tatiane", invoiceMonth: "2026-09-01", paymentMonth: "2026-09-01", amount: 200 },
+      { personId: "tatiane", invoiceMonth: "2026-09-01", paymentMonth: "2026-12-01", amount: 100 },
+    ];
+    const [september, november] = calculateDebtEvolution(flows, ["2026-11-01", "2026-09-01"]);
+
+    expect(september.month).toBe("2026-09-01");
+    expect(toMoneyNumber(september.byPerson.bruno.outstanding!)).toBe(2000);
+    expect(september.byPerson.bruno.paidSincePrevious).toBeNull();
+
+    const bruno = november.byPerson.bruno;
+    expect(toMoneyNumber(bruno.outstanding!)).toBe(1700);
+    // Venceram set (1000) e out (600) pela declaração de setembro.
+    expect(toMoneyNumber(bruno.paidSincePrevious!)).toBe(1600);
+    // Sobravam 400 de setembro; a declaração de novembro tem 1700 → 1300 de compras novas.
+    expect(toMoneyNumber(bruno.newSincePrevious!)).toBe(1300);
+    expect(toMoneyNumber(bruno.outstanding!)).toBe(2000 - 1600 + 1300);
+    expect(toMoneyNumber(bruno.invoice!)).toBe(900);
+    expect(bruno.invoiceProjected).toBe(false);
+    // Média das faturas realizadas: set 1000 e nov 900.
+    expect(toMoneyNumber(bruno.averageInvoice!)).toBe(950);
+
+    // Sem declaração em novembro: total desconhecido e fatura projetada (zero vencendo em nov).
+    const tatiane = november.byPerson.tatiane;
+    expect(tatiane.outstanding).toBeNull();
+    expect(tatiane.newSincePrevious).toBeNull();
+    expect(tatiane.invoice).toBeNull();
+  });
+
+  it("projects the upcoming installments from each person's latest declaration", () => {
+    const flows = [
+      { personId: "bruno", invoiceMonth: "2026-09-01", paymentMonth: "2026-12-01", amount: 999 },
+      { personId: "bruno", invoiceMonth: "2026-11-01", paymentMonth: "2026-11-01", amount: 900 },
+      { personId: "bruno", invoiceMonth: "2026-11-01", paymentMonth: "2026-12-01", amount: 500 },
+      { personId: "bruno", invoiceMonth: "2026-12-01", paymentMonth: "2027-01-01", amount: 1 },
+      { personId: "tatiane", invoiceMonth: "2026-09-01", paymentMonth: "2026-10-01", amount: 50 },
+      { personId: "tatiane", invoiceMonth: "2026-09-01", paymentMonth: "2027-02-01", amount: 100 },
+    ];
+    const outlook = calculateDebtOutlook(flows, "2026-11-01");
+
+    expect(outlook.byPerson.bruno.baseMonth).toBe("2026-11-01");
+    expect(outlook.byPerson.bruno.schedule.map((row) => [row.month, toMoneyNumber(row.amount)])).toEqual([
+      ["2026-11-01", 900],
+      ["2026-12-01", 500],
+    ]);
+    // Tatiane: declaração de setembro, só o que ainda vence a partir de novembro.
+    expect(outlook.byPerson.tatiane.schedule.map((row) => [row.month, toMoneyNumber(row.amount)])).toEqual([["2027-02-01", 100]]);
   });
 
   it("calculates debt nominal, PV and float", () => {

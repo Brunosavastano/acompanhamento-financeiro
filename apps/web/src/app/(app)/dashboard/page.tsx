@@ -5,12 +5,9 @@ import { getRequiredPageHouseholdId } from "@/lib/authz";
 import { currency, number, percent } from "@/lib/format";
 import { asMonthStart, nextMonth } from "@/lib/date";
 import { getDashboardData } from "@/server/metrics";
-import {
-  CompositionPanel,
-  EvolutionPanel,
-  HeroSparkline,
-  VariationPanel,
-} from "@/components/dashboard-panels";
+import { getEvolutionData } from "@/server/evolution";
+import { CompositionPanel, HeroSparkline, VariationPanel } from "@/components/dashboard-panels";
+import { DebtEvolutionPanel, EvolutionExplorer } from "@/components/evolution-panels";
 import { EmptyState, PageBody, Panel, PanelTitle } from "@/components/ui";
 import { PageHeader } from "@/components/page-header";
 import { MonthPager } from "@/components/month-pager";
@@ -135,6 +132,7 @@ export default async function DashboardPage({
   }
 
   const kpis = data.kpis;
+  const evolution = await getEvolutionData(householdId, asMonthStart(data.periodMonth));
   const history = data.charts.netWorthEvolution;
   const currentKey = data.periodMonth.slice(0, 7);
   const currentIndex = history.findIndex((row) => row.month === currentKey);
@@ -350,9 +348,13 @@ export default async function DashboardPage({
           </div>
         </Panel>
 
+        <div className="mt-4">
+          <EvolutionExplorer data={evolution} />
+        </div>
+
         <div className="mt-4 grid gap-4 xl:grid-cols-[1.5fr_1fr]">
           <div className="flex min-w-0 flex-col gap-4">
-            <EvolutionPanel data={upToCurrent.map((row) => ({ month: String(row.month), value: Number(row.value) }))} />
+            <DebtEvolutionPanel data={evolution} />
             <VariationPanel data={variationRows.slice(-12)} average={averageVariation} />
           </div>
 

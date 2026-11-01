@@ -286,6 +286,109 @@ export function calculateMonthlyInvoiceMetrics(cashflows: DebtCashflowInput[], p
   return { monthlyInvoiceTotal, byPerson };
 }
 
+export type DebtEvolutionPersonMonth = {
+  /** Total a pagar declarado na base do mês (soma das parcelas); null se a pessoa não declarou. */
+  outstanding: Decimal | null;
+  /** Fatura que vence no mês (base mais recente vence); null sem nenhuma informação. */
+  invoice: Decimal | null;
+  /** A fatura veio de uma declaração anterior: o mês não teve declaração própria. */
+  invoiceProjected: boolean;
+  /** Média das faturas realizadas na janela até o mês, ignorando meses zerados. */
+  averageInvoice: Decimal | null;
+  /** Parcelas que venceram desde o mês anterior da lista, pela declaração anterior. */
+  paidSincePrevious: Decimal | null;
+  /** Compras novas no cartão desde o mês anterior da lista (líquidas de estornos). */
+  newSincePrevious: Decimal | null;
+};
+
+export type DebtEvolutionMonth = { month: string; byPerson: Record<string, DebtEvolutionPersonMonth> };
+
+/** Declarações por pessoa → base → vencimento → valor. */
+function declarationsByPerson(cashflows: DebtCashflowInput[]) {
+  const declared = new Map<string, Map<string, Map<string, Decimal>>>();
+  for (const flow of cashflows) {
+    const base = normalizeMonth(flow.invoiceMonth);
+    const due = normalizeMonth(flow.paymentMonth);
+    const byBase = declared.get(flow.personId) ?? new Map<string, Map<string, Decimal>>();
+    const byDue = byBase.get(base) ?? new Map<string, Decimal>();
+    byDue.set(due, (byDue.get(due) ?? ZERO).plus(decimal(flow.amount)));
+    byBase.set(base, byDue);
+    declared.set(flow.personId, byBase);
+  }
+  return declared;
+}
+
+function sumDue(byDue: Map<string, Decimal>, from: string, before?: string): Decimal {
+  let total = ZERO;
+  for (const [due, amount] of byDue) {
+    if (due >= from && (before === undefined || due < before)) total = total.plus(amount);
+  }
+  return total;
+}
+
+/**
+ * Evolução das dívidas de cartão nos meses informados. O total a pagar de cada
+ * mês é a declaração da própria base (a mesma que entra no patrimônio). Entre
+ * dois meses da lista vale a ponte: total(b) = total(a) − parcelas que venceram
+ * no intervalo + compras novas.
+ */
+export function calculateDebtEvolution(
+  cashflows: DebtCashflowInput[],
+  months: Array<string | Date>,
+  windowMonths = 12,
+): DebtEvolutionMonth[] {
+  const sortedMonths = [...new Set(months.map(normalizeMonth))].sort();
+  const declared = declarationsByPerson(cashflows);
+  const deduped = dedupeLatestInvoiceBase(cashflows);
+  const realized = realizedInvoiceExpenses(cashflows);
+
+  return sortedMonths.map((month, index) => {
+    const previous = index > 0 ? sortedMonths[index - 1] : null;
+    const invoices = calculateMonthlyInvoiceMetrics(deduped, month);
+    const averages = calculateMovingAverageExpense(realized, month, windowMonths).averageByPerson;
+    const byPerson: Record<string, DebtEvolutionPersonMonth> = {};
+
+    for (const [personId, bases] of declared) {
+      const current = bases.get(month);
+      const before = previous ? bases.get(previous) : undefined;
+      const outstanding = current ? sumDue(current, month) : null;
+      const invoice = invoices.byPerson[personId] ?? (current ? ZERO : null);
+      const bridge = outstanding !== null && before && previous ? { paid: sumDue(before, previous, month), remaining: sumDue(before, month) } : null;
+      byPerson[personId] = {
+        outstanding,
+        invoice,
+        invoiceProjected: invoice !== null && !current,
+        averageInvoice: averages[personId] ?? null,
+        paidSincePrevious: bridge ? bridge.paid : null,
+        newSincePrevious: bridge && outstanding !== null ? outstanding.minus(bridge.remaining) : null,
+      };
+    }
+    return { month, byPerson };
+  });
+}
+
+export type DebtOutlook = {
+  asOfMonth: string;
+  byPerson: Record<string, { baseMonth: string; schedule: Array<{ month: string; amount: Decimal }> }>;
+};
+
+/** Parcelas a vencer a partir do mês, pela declaração mais recente de cada pessoa até ele. */
+export function calculateDebtOutlook(cashflows: DebtCashflowInput[], asOfMonth: string | Date): DebtOutlook {
+  const asOf = normalizeMonth(asOfMonth);
+  const byPerson: DebtOutlook["byPerson"] = {};
+  for (const [personId, bases] of declarationsByPerson(cashflows)) {
+    const candidates = [...bases.keys()].filter((base) => base <= asOf).sort();
+    const baseMonth = candidates[candidates.length - 1];
+    if (!baseMonth) continue;
+    const schedule = [...bases.get(baseMonth)!.entries()]
+      .filter(([due, amount]) => due >= asOf && !amount.isZero())
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([month, amount]) => ({ month, amount }));
+    byPerson[personId] = { baseMonth, schedule };
+  }
+  return { asOfMonth: asOf, byPerson };
+}
+
 export function calculateBudgetMetrics(items: BudgetItemInput[], periodMonth: string | Date): BudgetMetrics {
   const period = normalizeMonth(periodMonth);
   let incomeTotal = ZERO;
