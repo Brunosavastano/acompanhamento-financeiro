@@ -23,6 +23,9 @@ import { POST as createAccount } from "@/app/api/accounts/route";
 import { DELETE as deleteAccount, PUT as updateAccount } from "@/app/api/accounts/[id]/route";
 import { GET as listAuditLogs } from "@/app/api/audit-logs/route";
 import { GET as exportBackup } from "@/app/api/backup/export/route";
+import { getEvolutionData } from "@/server/evolution";
+import { getSnapshotHistory } from "@/server/metrics";
+import { debtRows, summaryRows } from "@/lib/evolution";
 
 const mockedAuth = vi.hoisted(() => ({
   householdId: "api-test-household",
@@ -706,6 +709,14 @@ describe.skipIf(!runDbTests)("API route integration flows", () => {
     expect(preview.debt.monthlyInvoiceTotal).toBe(800);
 
     expect((await closeSnapshot(new Request("http://test.local", { method: "POST" }), routeParams({ id: march.id }))).status).toBe(200);
+
+    // A evolução por conta soma exatamente o patrimônio do histórico, mês a mês.
+    const evolution = await getEvolutionData(mockedAuth.householdId, new Date("2037-03-01T00:00:00.000Z"));
+    const history = await getSnapshotHistory(mockedAuth.householdId);
+    expect(summaryRows(evolution, "familia").map((row) => [row.month, row.patrimonio])).toEqual(history.map((row) => [row.month, row.netWorth]));
+    expect(summaryRows(evolution, bruno.id).map((row) => row.caixa)).toEqual([1000, 1400]);
+    // Dívida de março: a declaração da própria base (800), a fatura sem somar a importada sem acento.
+    expect(debtRows(evolution, "familia").at(-1)).toMatchObject({ month: "2037-03", outstanding: 800, invoice: 800, invoiceProjected: false });
 
     const goals = await (await listGoals(new Request("http://test.local/api/goals?period_month=2037-03"))).json();
     const cfa = goals.find((goal: { id: string }) => goal.id === manualGoal.id);

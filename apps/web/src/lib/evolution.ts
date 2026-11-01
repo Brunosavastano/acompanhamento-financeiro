@@ -1,0 +1,176 @@
+// Séries da visão geral (evolução do patrimônio e das dívidas) montadas a
+// partir dos saldos de cada conta por mês. Funções puras: rodam no cliente
+// para trocar pessoa/séries sem nova consulta ao servidor.
+
+export type EvolutionAccount = {
+  key: string;
+  personId: string;
+  name: string;
+  category: "cash" | "benefit" | "investment" | "cashback";
+  /** Mesmas fronteiras dos cards: VR/VA conta como caixa e cashback como investimento. */
+  group: "cash" | "investments";
+};
+
+export type EvolutionMonth = {
+  month: string;
+  /** Saldo de cada conta (soma das linhas) no fechamento do mês. */
+  balances: Record<string, number>;
+  /** Dívida de cartão a valor presente por pessoa (como entra no patrimônio). */
+  debtPv: Record<string, number>;
+  /** Total da família arredondado uma vez só (bate com o card de patrimônio). */
+  debtPvTotal: number;
+};
+
+export type DebtPersonMonth = {
+  outstanding: number | null;
+  invoice: number | null;
+  invoiceProjected: boolean;
+  averageInvoice: number | null;
+  paidSincePrevious: number | null;
+  newSincePrevious: number | null;
+};
+
+export type EvolutionData = {
+  people: Array<{ id: string; name: string }>;
+  accounts: EvolutionAccount[];
+  months: EvolutionMonth[];
+  debt: {
+    months: Array<{ month: string; byPerson: Record<string, DebtPersonMonth> }>;
+    outlook: { asOfMonth: string; byPerson: Record<string, { baseMonth: string; schedule: Array<{ month: string; amount: number }> }> };
+  };
+};
+
+/** "familia" ou o id de uma pessoa. */
+export type Scope = string;
+export const FAMILY_SCOPE = "familia";
+
+export const SUMMARY_KEYS = ["patrimonio", "caixa", "investimentos", "dividas"] as const;
+export type SummaryKey = (typeof SUMMARY_KEYS)[number];
+
+export const SUMMARY_LABELS: Record<SummaryKey, string> = {
+  patrimonio: "Patrimônio",
+  caixa: "Caixa",
+  investimentos: "Investimentos",
+  dividas: "Dívidas",
+};
+
+export type SummaryRow = { month: string } & Record<SummaryKey, number>;
+
+const round2 = (value: number) => Math.round(value * 100) / 100;
+
+function inScope(scope: Scope, personId: string) {
+  return scope === FAMILY_SCOPE || scope === personId;
+}
+
+/** Caixa, investimentos, dívidas e patrimônio de cada mês para a pessoa (ou a família). */
+export function summaryRows(data: Pick<EvolutionData, "accounts" | "months">, scope: Scope): SummaryRow[] {
+  const accounts = data.accounts.filter((account) => inScope(scope, account.personId));
+  return data.months.map((row) => {
+    let caixa = 0;
+    let investimentos = 0;
+    for (const account of accounts) {
+      const value = row.balances[account.key] ?? 0;
+      if (account.group === "cash") caixa += value;
+      else investimentos += value;
+    }
+    const dividas =
+      scope === FAMILY_SCOPE
+        ? row.debtPvTotal
+        : Object.entries(row.debtPv).reduce((sum, [personId, value]) => (personId === scope ? sum + value : sum), 0);
+    return {
+      month: row.month,
+      caixa: round2(caixa),
+      investimentos: round2(investimentos),
+      dividas: round2(dividas),
+      patrimonio: round2(caixa + investimentos - dividas),
+    };
+  });
+}
+
+/** Componentes que podem ser somados numa linha só (o patrimônio já é a soma de tudo). */
+export const COMBINABLE_KEYS: SummaryKey[] = ["caixa", "investimentos", "dividas"];
+
+export function combinedValue(row: SummaryRow, keys: SummaryKey[]): number {
+  return round2(keys.reduce((sum, key) => (key === "dividas" ? sum - row.dividas : key === "patrimonio" ? sum : sum + row[key]), 0));
+}
+
+export function combinedLabel(keys: SummaryKey[]): string {
+  const assets = keys.filter((key) => key === "caixa" || key === "investimentos").map((key) => SUMMARY_LABELS[key]);
+  const label = assets.join(" + ");
+  return keys.includes("dividas") ? `${label || "0"} − Dívidas` : label;
+}
+
+export type AccountSeries = {
+  account: EvolutionAccount;
+  points: Array<{ month: string; value: number }>;
+  current: number;
+  previous: number | null;
+};
+
+/** Evolução de cada conta da pessoa (ou da família), sem as contas zeradas no período. */
+export function accountSeries(data: Pick<EvolutionData, "accounts" | "months">, scope: Scope): AccountSeries[] {
+  return data.accounts
+    .filter((account) => inScope(scope, account.personId))
+    .map((account) => {
+      const points = data.months.map((row) => ({ month: row.month, value: round2(row.balances[account.key] ?? 0) }));
+      return {
+        account,
+        points,
+        current: points.length > 0 ? points[points.length - 1].value : 0,
+        previous: points.length > 1 ? points[points.length - 2].value : null,
+      };
+    })
+    .filter((series) => series.points.some((point) => point.value !== 0));
+}
+
+export type DebtRow = {
+  month: string;
+  outstanding: number | null;
+  invoice: number | null;
+  invoiceProjected: boolean;
+  averageInvoice: number | null;
+  paidSincePrevious: number | null;
+  newSincePrevious: number | null;
+  /** Pessoas do recorte sem declaração no mês (com declaração em algum outro mês). */
+  missing: string[];
+};
+
+function sumNullable(values: Array<number | null>): number | null {
+  const present = values.filter((value): value is number => value !== null);
+  return present.length === 0 ? null : round2(present.reduce((sum, value) => sum + value, 0));
+}
+
+/** Total a pagar, fatura do mês e média por mês, somando as pessoas do recorte. */
+export function debtRows(data: Pick<EvolutionData, "debt">, scope: Scope): DebtRow[] {
+  return data.debt.months.map((row) => {
+    const people = Object.entries(row.byPerson).filter(([personId]) => inScope(scope, personId));
+    const values = people.map(([, value]) => value);
+    return {
+      month: row.month,
+      outstanding: sumNullable(values.map((value) => value.outstanding)),
+      invoice: sumNullable(values.map((value) => value.invoice)),
+      invoiceProjected: values.some((value) => value.invoiceProjected),
+      averageInvoice: sumNullable(values.map((value) => value.averageInvoice)),
+      paidSincePrevious: sumNullable(values.map((value) => value.paidSincePrevious)),
+      newSincePrevious: sumNullable(values.map((value) => value.newSincePrevious)),
+      missing: people.filter(([, value]) => value.outstanding === null).map(([personId]) => personId),
+    };
+  });
+}
+
+export type OutlookRow = { month: string; amount: number; remainingAfter: number };
+
+/** Parcelas a vencer por mês e quanto ainda falta pagar depois de cada uma. */
+export function outlookRows(data: Pick<EvolutionData, "debt">, scope: Scope): OutlookRow[] {
+  const totals = new Map<string, number>();
+  for (const [personId, value] of Object.entries(data.debt.outlook.byPerson)) {
+    if (!inScope(scope, personId)) continue;
+    for (const item of value.schedule) totals.set(item.month, (totals.get(item.month) ?? 0) + item.amount);
+  }
+  const rows = [...totals.entries()].sort(([a], [b]) => a.localeCompare(b));
+  let remaining = rows.reduce((sum, [, amount]) => sum + amount, 0);
+  return rows.map(([month, amount]) => {
+    remaining -= amount;
+    return { month, amount: round2(amount), remainingAfter: round2(Math.max(remaining, 0)) };
+  });
+}

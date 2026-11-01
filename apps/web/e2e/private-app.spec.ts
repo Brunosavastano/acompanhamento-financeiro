@@ -41,6 +41,17 @@ test.describe.serial("private finance app", () => {
     await expect(page.getByRole("heading", { name: "Visão geral" })).toBeVisible();
     await expect(page.getByText("R$ 275.223,18").first()).toBeVisible();
 
+    // Evolução por pessoa (com a evolução de cada conta) e dívidas ao longo do tempo.
+    const explorer = page.locator("section", { has: page.getByRole("heading", { name: "Evolução", exact: true }) });
+    await expect(explorer.getByRole("group", { name: "Séries do gráfico" })).toBeVisible();
+    await explorer.getByRole("button", { name: "Tatiane" }).click();
+    await expect(explorer.getByRole("button", { name: "Tatiane" })).toHaveAttribute("aria-pressed", "true");
+    await expect(explorer.getByRole("heading", { name: "Cada conta" })).toBeVisible();
+    const debts = page.locator("section", { has: page.getByRole("heading", { name: "Dívidas do cartão" }) });
+    await expect(debts.getByText(/Desde abril, venceram/)).toBeVisible();
+    await debts.getByRole("tab", { name: "Próximos meses" }).click();
+    await expect(debts.getByText(/Sem compras novas, as parcelas já lançadas terminam em/)).toBeVisible();
+
     const backup = await page.evaluate(async () => {
       const response = await fetch("/api/backup/export");
       return response.json();
