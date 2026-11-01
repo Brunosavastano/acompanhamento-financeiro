@@ -3,18 +3,26 @@ import {
   addMonths,
   calculateBudgetProjection,
   calculateDebtMetrics,
-  calculateGoalProgress,
   calculateMonthlyInvoiceMetrics,
   calculatePatrimonyMetrics,
   calculateRequiredCagr,
   dedupeLatestInvoiceBase,
   monthDiff,
+  realizedInvoiceExpenses,
   toMoneyNumber,
   toNumber,
 } from "@finance/financial-calculations";
 import { prisma } from "@/lib/prisma";
 import { asMonthStart, formatPeriod, parseMonthOrNull } from "@/lib/date";
 import { toDecimalNumber } from "@/lib/format";
+import {
+  goalTargetValue,
+  isComputedGoal,
+  metricValuesForGoals,
+  pickClosestGoals,
+  resolveGoalProgress,
+  type GoalMetricValues,
+} from "@/server/goal-progress";
 import { visibleGoalWhere } from "@/server/goal-scope";
 
 export type DashboardData = Awaited<ReturnType<typeof getDashboardData>>;
@@ -54,8 +62,8 @@ export async function getDashboardData(householdId: string, periodMonth?: string
     getSnapshotHistory(householdId),
     prisma.person.findMany({ where: { householdId }, orderBy: { name: "asc" } }),
   ]);
-  const goalRows = await getGoalRowsForMetrics(householdId, snapshot.periodMonth, metricValuesForGoals(metrics));
-  const goals = [...goalRows].sort((a, b) => b.progressPct - a.progressPct).slice(0, 3);
+  const goalRows = await getGoalRowsForMetrics(householdId, snapshot.periodMonth, metricValuesForGoals(metrics.kpis));
+  const goals = pickClosestGoals(goalRows);
   const reserveGoal = goalRows.find((goal) => goal.metricKey === "meses_de_reserva");
 
   return {
@@ -71,7 +79,7 @@ export async function getDashboardData(householdId: string, periodMonth?: string
         { name: "Investimentos", value: metrics.kpis.investmentsTotal },
         { name: "Dívidas PV", value: metrics.kpis.debtPvTotal },
       ],
-      monthlyVariation: history.map((row) => ({ month: row.month, value: row.monthlyVariation })),
+      monthlyVariation: history.map((row) => ({ month: row.month, value: row.monthlyVariation, months: row.monthsSincePrevious })),
       assetsVsDebt: history.map((row) => ({ month: row.month, assets: row.assetsTotal, debt: row.debtPvTotal })),
       debtToAssets: history.map((row) => ({ month: row.month, value: row.debtToAssets })),
       reserveMonths: history.map((row) => ({ month: row.month, value: row.reserveMonths })),
@@ -84,7 +92,7 @@ export async function getDashboardData(householdId: string, periodMonth?: string
     closestGoals: goals,
     people: people.map((person) => ({ id: person.id, name: person.name, role: person.role })),
     composition: buildCompositionScopes(metrics.snapshot.positions, people, metrics.debt),
-    reserveTargetMonths: reserveGoal ? parseNumericGoalValue(reserveGoal.targetValue) : null,
+    reserveTargetMonths: reserveGoal ? reserveGoal.targetNumeric : null,
   };
 }
 
@@ -108,7 +116,15 @@ function buildCompositionScopes(
 
   for (const position of positions) {
     const amount = toDecimalNumber(position.amount);
-    const key = position.category === "investment" ? "investments" : position.category === "cash" ? "cash" : "benefits";
+    // Mesmas fronteiras dos KPIs (e da planilha): cashback conta como
+    // investimento e VR/VA como caixa — assim "Investimentos" e "Caixa" batem
+    // entre o card do topo e este painel.
+    const key =
+      position.category === "investment" || position.category === "cashback"
+        ? "investments"
+        : position.category === "cash"
+          ? "cash"
+          : "benefits";
     household[key] += amount;
     const personBucket = perPerson.get(position.personId);
     if (personBucket) personBucket[key] += amount;
@@ -172,7 +188,7 @@ export async function calculateSnapshotMetrics(householdId: string, snapshotId: 
   const budget = calculateBudgetProjection({
     items: mapBudgetItemsForCalculation(budgetItems),
     periodMonth,
-    cardExpenses: mapCardExpensesLatestBase(cardCashflows),
+    cardExpenses: mapRealizedCardExpenses(cardCashflows),
   });
 
   const debt = calculateDebtMetrics(
@@ -231,6 +247,8 @@ export async function calculateSnapshotMetrics(householdId: string, snapshotId: 
     });
     previousNetWorth = toNumber(previous.netWorth);
   }
+  // Mês pulado (ex.: setembro → novembro): a variação cobre 2 meses.
+  const monthsSincePrevious = previousSnapshot ? Math.max(1, monthDiff(previousSnapshot.periodMonth, snapshot.periodMonth)) : 1;
 
   const patrimony = calculatePatrimonyMetrics({
     positions: snapshot.positions.map((position) => ({
@@ -242,6 +260,7 @@ export async function calculateSnapshotMetrics(householdId: string, snapshotId: 
     previousNetWorth,
     incomeTotal: budget.incomeTotal,
     expenseTotal: budget.expenseTotal,
+    monthsSincePrevious,
   });
 
   return {
@@ -254,6 +273,8 @@ export async function calculateSnapshotMetrics(householdId: string, snapshotId: 
       debtPvTotal: toMoneyNumber(patrimony.debtPvTotal),
       monthlyVariation: toMoneyNumber(patrimony.monthlyVariation),
       monthlyVariationPct: toNumber(patrimony.monthlyVariationPct),
+      monthsSincePrevious,
+      previousPeriodMonth: previousSnapshot ? formatPeriod(previousSnapshot.periodMonth) : null,
       debtToAssets: toNumber(patrimony.debtToAssets),
       reserveMonths: toNumber(patrimony.reserveMonths),
       investmentsToAssets: toNumber(patrimony.investmentsToAssets),
@@ -357,9 +378,12 @@ export async function getSnapshotHistory(householdId: string) {
 
   const rows = [];
   let previousNetWorth: number | null = null;
+  let previousPeriod: Date | null = null;
   const budgetItems = await prisma.budgetItem.findMany({ where: { householdId } });
 
   for (const snapshot of deduped.values()) {
+    const monthsSincePrevious = previousPeriod ? Math.max(1, monthDiff(previousPeriod, snapshot.periodMonth)) : 1;
+    previousPeriod = snapshot.periodMonth;
     const debtCashflows = await prisma.debtCashflow.findMany({
       where: { householdId, invoiceMonth: snapshot.periodMonth },
     });
@@ -384,10 +408,13 @@ export async function getSnapshotHistory(householdId: string) {
       previousNetWorth,
       incomeTotal: budget.incomeTotal,
       expenseTotal: budget.expenseTotal,
+      monthsSincePrevious,
     });
 
     const netWorth = toMoneyNumber(patrimony.netWorth);
-    previousNetWorth = netWorth;
+    // PL anterior SEM arredondar (como calculateSnapshotMetrics e a planilha):
+    // arredondar antes de subtrair deixava a variação 1 centavo diferente.
+    previousNetWorth = toNumber(patrimony.netWorth);
     rows.push({
       id: snapshot.id,
       month: formatPeriod(snapshot.periodMonth).slice(0, 7),
@@ -399,6 +426,7 @@ export async function getSnapshotHistory(householdId: string) {
       debtPvTotal: toMoneyNumber(patrimony.debtPvTotal),
       netWorth,
       monthlyVariation: toMoneyNumber(patrimony.monthlyVariation),
+      monthsSincePrevious,
       debtToAssets: toNumber(patrimony.debtToAssets),
       reserveMonths: toNumber(patrimony.reserveMonths),
       patrimonialSavingsRate: toNumber(patrimony.patrimonialSavingsRate),
@@ -409,136 +437,79 @@ export async function getSnapshotHistory(householdId: string) {
 }
 
 export async function getGoalRows(householdId: string, periodMonth: Date | string) {
+  // Só meses FECHADOS alimentam as metas: um rascunho recém-criado tem os
+  // saldos em R$ 0 e faria a "Dívida/Ativos" parecer atingida, a reserva zerar etc.
   const snapshot = await prisma.monthlySnapshot.findFirst({
-    where: { householdId, periodMonth: asMonthStart(periodMonth) },
+    where: { householdId, periodMonth: asMonthStart(periodMonth), status: { in: dashboardSnapshotStatuses } },
     orderBy: { revisionNumber: "desc" },
   });
-  const metricValues = snapshot ? metricValuesForGoals(await calculateSnapshotMetrics(householdId, snapshot.id)) : {};
+  const metricValues = snapshot ? metricValuesForGoals((await calculateSnapshotMetrics(householdId, snapshot.id)).kpis) : {};
   return getGoalRowsForMetrics(householdId, asMonthStart(periodMonth), metricValues);
 }
 
-export async function getGoalCards(householdId: string, periodMonth: Date, metricValues: Record<string, number | string> = {}) {
-  const goals = await getGoalRowsForMetrics(householdId, periodMonth, metricValues);
-  return goals.sort((a, b) => b.progressPct - a.progressPct).slice(0, 3);
-}
-
-async function getGoalRowsForMetrics(householdId: string, periodMonth: Date, metricValues: Record<string, number | string>) {
-  const goals = await prisma.goal.findMany({
+/** Metas visíveis com o registro de progresso mais recente ATÉ o mês (base para metas manuais). */
+function findGoalsWithLatestProgress(householdId: string, periodMonth: Date) {
+  return prisma.goal.findMany({
     where: visibleGoalWhere(householdId),
     include: {
       progressSnapshots: {
-        where: { periodMonth },
+        where: { periodMonth: { lte: periodMonth } },
+        orderBy: { periodMonth: "desc" },
         take: 1,
       },
     },
     orderBy: [{ horizon: "asc" }, { createdAt: "asc" }],
   });
-
-  return goals
-    .map((goal) => {
-      const snapshot = goal.progressSnapshots[0];
-      const targetValue = goal.targetValueDecimal?.toString() ?? goal.targetValueText ?? null;
-      const base = {
-        id: goal.id,
-        title: goal.title,
-        horizon: goal.horizon,
-        metricKey: goal.metricKey,
-        targetValue,
-        targetDate: goal.targetDate,
-        comparisonOperator: goal.comparisonOperator,
-        riskCapValue: goal.riskCapValue?.toString() ?? null,
-        notes: goal.notes,
-      };
-      if (!snapshot && goal.comparisonOperator !== "manual") {
-        const currentValue = metricValues[goal.metricKey] ?? goal.manualCurrentValue ?? "0";
-        const progress = calculateGoalProgress({
-          currentValue,
-          targetValue: targetValue ?? "0",
-          comparisonOperator: goal.comparisonOperator,
-          riskCapValue: goal.riskCapValue?.toString() ?? null,
-        });
-        return {
-          ...base,
-          progressPct: toNumber(progress),
-          currentValue: String(currentValue),
-          status: progress.gte(1) ? "achieved" : progress.lt(0.5) ? "attention" : "in_progress",
-          progressSource: "calculated" as const,
-          requiredCagr: requiredGoalCagr(String(currentValue), targetValue, goal.targetDate, periodMonth, goal.comparisonOperator),
-        };
-      }
-      const currentValue = snapshot?.currentValue ?? goal.manualCurrentValue ?? null;
-      return {
-        ...base,
-        progressPct: snapshot ? toDecimalNumber(snapshot.progressPct) : 0,
-        currentValue,
-        status: snapshot?.status ?? "in_progress",
-        progressSource: snapshot ? ("manual" as const) : ("empty" as const),
-        requiredCagr: requiredGoalCagr(currentValue, targetValue, goal.targetDate, periodMonth, goal.comparisonOperator),
-      };
-    });
 }
 
-function metricValuesForGoals(metrics: Awaited<ReturnType<typeof calculateSnapshotMetrics>>) {
-  return {
-    meses_de_reserva: metrics.kpis.reserveMonths,
-    invest_ativos: metrics.kpis.investmentsToAssets,
-    divida_ativos: metrics.kpis.debtToAssets,
-    tx_poupanca: metrics.kpis.patrimonialSavingsRate,
-    pl_total: metrics.kpis.netWorth,
-    invest_total: metrics.kpis.investmentsTotal,
-    caixa_total: metrics.kpis.cashTotal,
-  };
-}
+async function getGoalRowsForMetrics(householdId: string, periodMonth: Date, metricValues: GoalMetricValues) {
+  const goals = await findGoalsWithLatestProgress(householdId, periodMonth);
 
-export async function rebuildGoalProgress(householdId: string, periodMonth: Date, metricValues: Record<string, number | string>) {
-  const goals = await prisma.goal.findMany({
-    where: visibleGoalWhere(householdId),
-    include: { progressSnapshots: { where: { periodMonth }, take: 1 } },
-  });
-  for (const goal of goals) {
-    const existing = goal.progressSnapshots[0];
-    if (goal.comparisonOperator === "manual") {
-      const progressPct = existing ? toDecimalNumber(existing.progressPct) : 0;
-      const currentValue = existing?.currentValue ?? goal.manualCurrentValue ?? "";
-      await prisma.goalProgressSnapshot.upsert({
-        where: { goalId_periodMonth: { goalId: goal.id, periodMonth } },
-        create: {
-          goalId: goal.id,
-          periodMonth,
-          currentValue: String(currentValue),
-          progressPct,
-          status: existing?.status ?? (progressPct >= 1 ? "achieved" : "in_progress"),
-        },
-        update: {
-          currentValue: String(currentValue),
-          progressPct,
-          status: existing?.status ?? (progressPct >= 1 ? "achieved" : "in_progress"),
-        },
-      });
-      continue;
-    }
-
-    const currentValue = metricValues[goal.metricKey] ?? goal.manualCurrentValue ?? "0";
-    const progress = calculateGoalProgress({
-      currentValue,
-      targetValue: goal.targetValueDecimal?.toString() ?? goal.targetValueText ?? "0",
+  return goals.map((goal) => {
+    const targetValue = goalTargetValue(goal);
+    const resolved = resolveGoalProgress(goal, metricValues, goal.progressSnapshots[0] ?? null);
+    return {
+      id: goal.id,
+      title: goal.title,
+      horizon: goal.horizon,
+      metricKey: goal.metricKey,
+      targetValue,
+      targetDate: goal.targetDate,
       comparisonOperator: goal.comparisonOperator,
       riskCapValue: goal.riskCapValue?.toString() ?? null,
-    });
+      notes: goal.notes,
+      progressPct: resolved.progressPct,
+      currentValue: resolved.currentValue,
+      currentNumeric: resolved.currentNumeric,
+      targetNumeric: resolved.targetNumeric,
+      status: resolved.status,
+      progressSource: resolved.progressSource,
+      isComputed: isComputedGoal(goal),
+      requiredCagr: requiredGoalCagr(resolved.currentNumeric, resolved.targetNumeric, goal.targetDate, periodMonth, goal.comparisonOperator),
+    };
+  });
+}
+
+/**
+ * Grava o progresso das metas com métrica do app no mês fechado (histórico).
+ * Metas manuais NÃO ganham cópia: a leitura já carrega o último registro
+ * informado, e uma cópia automática impediria que a correção de um mês
+ * passado chegasse aos meses seguintes.
+ */
+export async function rebuildGoalProgress(householdId: string, periodMonth: Date, metricValues: GoalMetricValues) {
+  const goals = await findGoalsWithLatestProgress(householdId, periodMonth);
+  for (const goal of goals) {
+    if (!isComputedGoal(goal)) continue;
+    const resolved = resolveGoalProgress(goal, metricValues, goal.progressSnapshots[0] ?? null);
+    const data = {
+      currentValue: resolved.currentValue ?? "",
+      progressPct: resolved.progressPct,
+      status: resolved.status,
+    };
     await prisma.goalProgressSnapshot.upsert({
       where: { goalId_periodMonth: { goalId: goal.id, periodMonth } },
-      create: {
-        goalId: goal.id,
-        periodMonth,
-        currentValue: String(currentValue),
-        progressPct: progress.toNumber(),
-        status: progress.gte(1) ? "achieved" : progress.lt(0.5) ? "attention" : "in_progress",
-      },
-      update: {
-        currentValue: String(currentValue),
-        progressPct: progress.toNumber(),
-        status: progress.gte(1) ? "achieved" : progress.lt(0.5) ? "attention" : "in_progress",
-      },
+      create: { goalId: goal.id, periodMonth, ...data },
+      update: data,
     });
   }
 }
@@ -568,15 +539,13 @@ function mapBudgetItemsForCalculation(items: BudgetItem[]) {
 }
 
 function requiredGoalCagr(
-  currentValue: string | number | null,
-  targetValue: string | number | null,
+  current: number | null,
+  target: number | null,
   targetDate: string | null,
   periodMonth: Date,
   comparisonOperator: string,
 ) {
   if (comparisonOperator !== "greater_or_equal") return null;
-  const current = parseNumericGoalValue(currentValue);
-  const target = parseNumericGoalValue(targetValue);
   if (!targetDate || current === null || target === null || current <= 0 || target <= 0 || current >= target) return null;
 
   try {
@@ -588,18 +557,6 @@ function requiredGoalCagr(
   } catch {
     return null;
   }
-}
-
-function parseNumericGoalValue(value: string | number | null) {
-  if (typeof value === "number") return Number.isFinite(value) ? value : null;
-  if (!value) return null;
-  const compact = value.trim().replace(/[^0-9,.-]/g, "");
-  const normalized =
-    compact.includes(",") && compact.includes(".")
-      ? compact.replace(/\./g, "").replace(",", ".")
-      : compact.replace(",", ".");
-  const parsed = Number(normalized);
-  return Number.isFinite(parsed) ? parsed : null;
 }
 
 async function calculateBudgetProjectionForPeriod(householdId: string, budgetItems: BudgetItem[], periodMonth: string | Date) {
@@ -619,38 +576,32 @@ async function calculateBudgetProjectionForPeriod(householdId: string, budgetIte
   return calculateBudgetProjection({
     items: mapBudgetItemsForCalculation(budgetItems),
     periodMonth: monthStart,
-    cardExpenses: mapCardExpensesLatestBase(cardCashflows),
+    cardExpenses: mapRealizedCardExpenses(cardCashflows),
   });
 }
 
 /**
- * Converte fluxos do cartão na janela da média móvel em despesas mensais,
- * mantendo por (pessoa, cartão, vencimento) apenas a declaração da base mais
- * recente — evita contar 2× a mesma fatura re-declarada em bases sucessivas.
+ * Gasto mensal do cartão para a média móvel do orçamento: só a fatura
+ * REALIZADA de cada mês (declarada na própria base), como na planilha.
  */
-export function mapCardExpensesLatestBase(
+export function mapRealizedCardExpenses(
   cardCashflows: {
     personId: string;
     cardName: string;
     invoiceMonth: Date;
     paymentMonth: Date;
     amount: Prisma.Decimal | number;
-    source?: string | null;
   }[],
 ) {
-  return dedupeLatestInvoiceBase(
+  return realizedInvoiceExpenses(
     cardCashflows.map((flow) => ({
       personId: flow.personId,
       cardName: flow.cardName,
       invoiceMonth: flow.invoiceMonth,
       paymentMonth: flow.paymentMonth,
       amount: toDecimalNumber(flow.amount),
-      source: flow.source,
     })),
-  ).map((flow) => ({
-    periodMonth: flow.paymentMonth,
-    amount: flow.amount,
-  }));
+  );
 }
 
 export function serializeDecimalObject<T extends Record<string, Prisma.Decimal | number | string | null>>(row: T) {

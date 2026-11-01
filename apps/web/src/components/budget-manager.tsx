@@ -3,6 +3,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { AlertCircle, CheckCircle2, Loader2, Pencil, Plus, Save, Trash2, X } from "lucide-react";
 import { clsx } from "clsx";
+import { isBudgetItemActive } from "@finance/financial-calculations";
 import { Input, Select } from "@/components/ui";
 import { currency, percent } from "@/lib/format";
 
@@ -71,6 +72,16 @@ function shortMonthYear(period: string) {
   const date = new Date(`${period.slice(0, 7)}-01`);
   const month = new Intl.DateTimeFormat("pt-BR", { month: "short", timeZone: "UTC" }).format(date).replace(".", "");
   return `${month}/${String(date.getUTCFullYear()).slice(2)}`;
+}
+
+/** Por que um item NÃO entra no total do mês exibido (ou null se entra). */
+function notCountedReason(item: Item, period: string): string | null {
+  if (!item.isActive) return "inativo";
+  const periodMonth = `${period.slice(0, 7)}-01`;
+  if (isBudgetItemActive(item, periodMonth)) return null;
+  if (item.recurrence === "one_off") return `pontual de ${shortMonthYear(item.startMonth)}`;
+  if (item.startMonth.slice(0, 7) > period.slice(0, 7)) return `começa em ${shortMonthYear(item.startMonth)}`;
+  return item.endMonth ? `encerrado em ${shortMonthYear(item.endMonth)}` : "fora do período";
 }
 
 function emptyForm(kind: BudgetKind, period: string): BudgetForm {
@@ -237,6 +248,9 @@ export function BudgetManager({ people, period }: { people: Person[]; period: st
   // quando itens manuais já a cobrem, a nota do card de cima explica a situação.
   const cardValue = metrics.cardMovingAverageAppliedExpense;
   const showCardItem = metrics.cardMovingAverageApplied && cardValue > 0;
+  // Cobertura parcial: quem já tem item de cartão próprio não entra de novo pela média.
+  const cardPartial = showCardItem && cardValue < metrics.cardMovingAverageExpense - 0.005;
+  const cardMonthsLabel = `${metrics.cardMovingAverageMonths} ${metrics.cardMovingAverageMonths === 1 ? "mês" : "meses"}`;
 
   const columns: { kind: BudgetKind; title: string; dot: string; addLabel: string; subtotal: number }[] = [
     { kind: "income", title: "Entradas", dot: "bg-positive", addLabel: "Adicionar entrada", subtotal: metrics.incomeTotal },
@@ -288,9 +302,24 @@ export function BudgetManager({ people, period }: { people: Person[]; period: st
               </span>
               {metrics.cardMovingAverageMonths > 0 ? (
                 <span className="ml-auto">
-                  Cartão entra pela média móvel de {metrics.cardMovingAverageMonths} {metrics.cardMovingAverageMonths === 1 ? "mês" : "meses"}:{" "}
-                  <strong className="font-semibold tabular-nums text-snow">{currency(metrics.cardMovingAverageExpense)}</strong>
-                  {!metrics.cardMovingAverageApplied ? " (já coberta pelos itens manuais)" : ""}
+                  {!metrics.cardMovingAverageApplied ? (
+                    <>
+                      Média móvel do cartão ({cardMonthsLabel}):{" "}
+                      <strong className="font-semibold tabular-nums text-snow">{currency(metrics.cardMovingAverageExpense)}</strong> — já coberta pelos
+                      itens do orçamento
+                    </>
+                  ) : cardPartial ? (
+                    <>
+                      Cartão entra pela média móvel de {cardMonthsLabel}:{" "}
+                      <strong className="font-semibold tabular-nums text-snow">{currency(cardValue)}</strong> (de{" "}
+                      {currency(metrics.cardMovingAverageExpense)}; o restante já está nos itens do orçamento)
+                    </>
+                  ) : (
+                    <>
+                      Cartão entra pela média móvel de {cardMonthsLabel}:{" "}
+                      <strong className="font-semibold tabular-nums text-snow">{currency(cardValue)}</strong>
+                    </>
+                  )}
                 </span>
               ) : null}
             </div>
@@ -323,10 +352,10 @@ export function BudgetManager({ people, period }: { people: Person[]; period: st
                     {column.kind === "variable_expense" && showCardItem ? (
                       <div className="flex items-center gap-2.5 border-b border-edge-hair py-2.5">
                         <div className="min-w-0 flex-1">
-                          <div className="truncate text-[13px] text-body">
-                            Cartão (média {metrics.cardMovingAverageMonths} {metrics.cardMovingAverageMonths === 1 ? "mês" : "meses"})
+                          <div className="truncate text-[13px] text-body">Cartão (média {cardMonthsLabel})</div>
+                          <div className="text-[11px] text-faint">
+                            {cardPartial ? "Automático · só de quem não tem item de cartão próprio" : "Automático · média móvel"}
                           </div>
-                          <div className="text-[11px] text-faint">Automático · média móvel</div>
                         </div>
                         <span className="text-[13px] font-semibold tabular-nums text-snow">{currency(cardValue)}</span>
                         <span className="w-[26px]" aria-hidden />
@@ -349,13 +378,16 @@ export function BudgetManager({ people, period }: { people: Person[]; period: st
                           }}
                         />
                       ) : (
-                        <div key={item.id} className={clsx("flex items-center gap-2.5 border-b border-edge-hair py-2.5", !item.isActive && "opacity-50")}>
+                        <div
+                          key={item.id}
+                          className={clsx("flex items-center gap-2.5 border-b border-edge-hair py-2.5", notCountedReason(item, period) && "opacity-50")}
+                        >
                           <div className="min-w-0 flex-1">
                             <div className="truncate text-[13px] text-body">{item.name}</div>
                             <div className="text-[11px] text-faint">
                               {item.person?.name ?? "Familiar"} · {recurrenceLabels[item.recurrence]}
-                              {item.endMonth ? ` · até ${shortMonthYear(item.endMonth)}` : ""}
-                              {!item.isActive ? " · inativo" : ""}
+                              {item.endMonth && item.recurrence !== "one_off" ? ` · até ${shortMonthYear(item.endMonth)}` : ""}
+                              {notCountedReason(item, period) ? ` · não conta neste mês (${notCountedReason(item, period)})` : ""}
                             </div>
                           </div>
                           <span className="text-[13px] font-semibold tabular-nums text-snow">{currency(Number(item.amountMonthly))}</span>

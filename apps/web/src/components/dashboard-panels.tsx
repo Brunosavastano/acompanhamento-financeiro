@@ -230,7 +230,13 @@ export function EvolutionPanel({ data }: { data: Point[] }) {
   );
 }
 
-export function VariationPanel({ data, average }: { data: Point[]; average: number | null }) {
+export function VariationPanel({ data, average }: { data: Array<Point & { months?: number }>; average: number | null }) {
+  // Um intervalo de mais de um mês (mês não fechado) aparece identificado no tooltip.
+  const monthsByLabel = new Map(data.map((row) => [row.month, row.months ?? 1]));
+  const tooltipLabel = (label: unknown) => {
+    const months = monthsByLabel.get(String(label)) ?? 1;
+    return months > 1 ? `${monthShort(String(label))} (variação de ${months} meses)` : monthShort(String(label));
+  };
   return (
     <section className="min-w-0 rounded-[14px] border border-edge bg-surface p-6">
       <div className="flex flex-wrap items-baseline justify-between gap-4">
@@ -262,7 +268,7 @@ export function VariationPanel({ data, average }: { data: Point[]; average: numb
               labelStyle={tooltipLabelStyle}
               itemStyle={tooltipItemStyle}
               formatter={(value) => [currency(Number(value)), "Variação"]}
-              labelFormatter={(label) => monthShort(String(label))}
+              labelFormatter={tooltipLabel}
             />
             <Bar dataKey="value" radius={[4, 4, 0, 0]} maxBarSize={34} isAnimationActive={false}>
               {data.map((entry, index) => (
@@ -302,10 +308,12 @@ export type CompositionScopeView = {
   debtPvTotal: number;
 };
 
+// Mesmas fronteiras dos KPIs: investimentos inclui cashback; as duas fatias
+// de caixa somam exatamente o card "Caixa disponível".
 const SLICE_META = [
-  { key: "investments", name: "Investimentos", color: GOLD },
-  { key: "cash", name: "Caixa e contas", color: INFO },
-  { key: "benefits", name: "Benefícios e cashback", color: STEEL },
+  { key: "investments", name: "Investimentos (inclui cashback)", color: GOLD },
+  { key: "cash", name: "Caixa — contas", color: INFO },
+  { key: "benefits", name: "Caixa — VR/VA", color: STEEL },
 ] as const;
 
 export function CompositionPanel({ scopes }: { scopes: CompositionScopeView[] }) {
@@ -313,8 +321,12 @@ export function CompositionPanel({ scopes }: { scopes: CompositionScopeView[] })
   const scope = scopes.find((item) => item.id === selectedId) ?? scopes[0];
   if (!scope) return null;
 
-  const slices = SLICE_META.map((meta) => ({ ...meta, value: scope[meta.key] })).filter((slice) => slice.value > 0);
-  const pct = (value: number) => (scope.total > 0 ? (value / scope.total) * 100 : 0);
+  // Saldo negativo (conta no vermelho) aparece na lista e reduz o total, mas
+  // não entra na barra: as fatias da barra são a parte positiva dos ativos.
+  const slices = SLICE_META.map((meta) => ({ ...meta, value: scope[meta.key] })).filter((slice) => slice.value !== 0);
+  const positiveSlices = slices.filter((slice) => slice.value > 0);
+  const positiveTotal = positiveSlices.reduce((sum, slice) => sum + slice.value, 0);
+  const pct = (value: number) => (positiveTotal > 0 ? (value / positiveTotal) * 100 : 0);
   const firstName = (label: string) => label.split(" ")[0];
 
   return (
@@ -346,7 +358,7 @@ export function CompositionPanel({ scopes }: { scopes: CompositionScopeView[] })
       {slices.length > 0 ? (
         <>
           <div className="mt-3.5 flex h-3.5 overflow-hidden rounded-full bg-elevated">
-            {slices.map((slice) => (
+            {positiveSlices.map((slice) => (
               <span key={slice.key} style={{ width: `${pct(slice.value)}%`, background: slice.color }} />
             ))}
           </div>
@@ -355,8 +367,17 @@ export function CompositionPanel({ scopes }: { scopes: CompositionScopeView[] })
               <div key={slice.key} className="flex items-center gap-2.5 text-[13px]">
                 <span className="h-[9px] w-[9px] shrink-0 rounded-[3px]" style={{ background: slice.color }} />
                 <span className="text-body">{slice.name}</span>
-                <span className="ml-auto whitespace-nowrap font-semibold tabular-nums text-snow">{brl0(slice.value)}</span>
-                <span className="w-11 text-right tabular-nums text-faint">{pct(slice.value).toFixed(1).replace(".", ",")}%</span>
+                <span
+                  className={clsx(
+                    "ml-auto whitespace-nowrap font-semibold tabular-nums",
+                    slice.value < 0 ? "text-negative-text" : "text-snow",
+                  )}
+                >
+                  {brl0(slice.value)}
+                </span>
+                <span className="w-11 text-right tabular-nums text-faint">
+                  {slice.value > 0 ? `${pct(slice.value).toFixed(1).replace(".", ",")}%` : "—"}
+                </span>
               </div>
             ))}
           </div>

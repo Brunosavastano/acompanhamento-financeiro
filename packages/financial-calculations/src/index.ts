@@ -34,6 +34,8 @@ export type BudgetItemInput = {
 export type MovingAverageExpenseInput = {
   periodMonth: string | Date;
   amount: MoneyLike;
+  /** Dono do gasto: a média é calculada por pessoa e depois somada, como na planilha. */
+  personId?: string | null;
 };
 
 export type PatrimonyMetrics = {
@@ -82,6 +84,8 @@ export type BudgetMetrics = {
 
 export type MovingAverageExpenseMetrics = {
   averageMonthly: Decimal;
+  /** Média de cada pessoa (chave "" quando o gasto não tem dono). */
+  averageByPerson: Record<string, Decimal>;
   total: Decimal;
   monthsUsed: number;
   windowStartMonth: string;
@@ -224,7 +228,7 @@ export function dedupeLatestInvoiceBase<T extends DebtCashflowInput>(cashflows: 
   // base" nem evicta declarações anteriores — sem isso, uma avulsa numa base
   // mais nova apagaria das métricas a projeção inteira do mês anterior.
   const isAdditive = (flow: T) => flow.source === "purchase";
-  const keyOf = (flow: T) => [flow.personId, flow.cardName ?? "", normalizeMonth(flow.paymentMonth)].join("\u0000");
+  const keyOf = (flow: T) => JSON.stringify([flow.personId, cardKey(flow.cardName), normalizeMonth(flow.paymentMonth)]);
 
   const latestBaseByKey = new Map<string, string>();
   for (const flow of cashflows) {
@@ -235,6 +239,30 @@ export function dedupeLatestInvoiceBase<T extends DebtCashflowInput>(cashflows: 
     if (!current || base > current) latestBaseByKey.set(key, base);
   }
   return cashflows.filter((flow) => isAdditive(flow) || latestBaseByKey.get(keyOf(flow)) === normalizeMonth(flow.invoiceMonth));
+}
+
+/**
+ * Identidade do cartão para comparação: ignora acento, caixa e espaços.
+ * Dados importados por versões antigas gravaram "Cartao principal" (sem til)
+ * e a UI grava "Cartão principal" — os dois são o MESMO cartão.
+ */
+export function cardKey(name: string | null | undefined): string {
+  return normalizeSearchText(name ?? "").replace(/\s+/g, " ").trim();
+}
+
+/**
+ * Fatura REALIZADA de cada mês: apenas o que foi declarado na própria base
+ * (invoiceMonth == paymentMonth) — a "fatura atual" informada ao fechar o mês.
+ * É a mesma regra da planilha (linha "Fatura do mês" da aba Dívidas). Projeções
+ * feitas em bases anteriores não entram: subestimam o gasto (compras feitas
+ * depois ainda não aparecem) e contariam em dobro com a declaração do próprio
+ * mês. Meses sem declaração própria ficam de fora da média, como o AVERAGEIF
+ * "<>0" da planilha.
+ */
+export function realizedInvoiceExpenses(cashflows: DebtCashflowInput[]): MovingAverageExpenseInput[] {
+  return cashflows
+    .filter((flow) => normalizeMonth(flow.invoiceMonth) === normalizeMonth(flow.paymentMonth))
+    .map((flow) => ({ personId: flow.personId, periodMonth: flow.paymentMonth, amount: flow.amount }));
 }
 
 export function calculateMonthlyInvoiceMetrics(cashflows: DebtCashflowInput[], periodMonth: string | Date): MonthlyInvoiceMetrics {
@@ -296,22 +324,39 @@ export function calculateMovingAverageExpense(
   const windowEndMonth = normalizeMonth(periodMonth);
   const windowStartMonth = addMonths(windowEndMonth, -(safeMaxMonths - 1));
   const totalsByMonth = new Map<string, Decimal>();
+  const totalsByPersonMonth = new Map<string, Map<string, Decimal>>();
 
   for (const expense of expenses) {
     const month = normalizeMonth(expense.periodMonth);
     if (month < windowStartMonth || month > windowEndMonth) continue;
-    totalsByMonth.set(month, (totalsByMonth.get(month) ?? ZERO).plus(decimal(expense.amount)));
+    const amount = decimal(expense.amount);
+    totalsByMonth.set(month, (totalsByMonth.get(month) ?? ZERO).plus(amount));
+    const person = expense.personId ?? "";
+    const personMonths = totalsByPersonMonth.get(person) ?? new Map<string, Decimal>();
+    personMonths.set(month, (personMonths.get(month) ?? ZERO).plus(amount));
+    totalsByPersonMonth.set(person, personMonths);
   }
 
   const monthlyTotals = [...totalsByMonth.entries()]
     .sort(([left], [right]) => left.localeCompare(right))
     .map(([month, amount]) => ({ periodMonth: month, amount }));
   const total = monthlyTotals.reduce((sum, row) => sum.plus(row.amount), ZERO);
-  const monthsUsed = monthlyTotals.length;
-  const averageMonthly = monthsUsed === 0 ? ZERO : total.div(monthsUsed);
+  const monthsUsed = monthlyTotals.filter((row) => !row.amount.isZero()).length;
+  // Média de cada pessoa só sobre os meses em que ELA teve fatura (AVERAGEIF
+  // "<>0" da planilha), somadas no fim (E31 = C31 + D31). Um mês sem a fatura
+  // de uma pessoa não dilui a média dela com um zero.
+  let averageMonthly = ZERO;
+  const averageByPerson: Record<string, Decimal> = {};
+  for (const [person, personMonths] of totalsByPersonMonth) {
+    const nonZero = [...personMonths.values()].filter((amount) => !amount.isZero());
+    if (nonZero.length === 0) continue;
+    averageByPerson[person] = nonZero.reduce((sum, amount) => sum.plus(amount), ZERO).div(nonZero.length);
+    averageMonthly = averageMonthly.plus(averageByPerson[person]);
+  }
 
   return {
     averageMonthly,
+    averageByPerson,
     total,
     monthsUsed,
     windowStartMonth,
@@ -330,9 +375,8 @@ export function calculateBudgetProjection(input: {
   const baseMetrics = calculateBudgetMetrics(input.items, input.periodMonth);
   const cardAverage = calculateMovingAverageExpense(input.cardExpenses ?? [], input.periodMonth, input.cardWindowMonths ?? 12);
   const period = normalizeMonth(input.periodMonth);
-  const shouldApplyCardMovingAverage = input.applyCardMovingAverage ?? !input.items.some((item) => isCardBudgetItem(item, period));
   const cardMovingAverageExpense = cardAverage.averageMonthly;
-  const cardMovingAverageAppliedExpense = shouldApplyCardMovingAverage ? cardMovingAverageExpense : ZERO;
+  const cardMovingAverageAppliedExpense = appliedCardAverage(input.items, period, cardAverage, input.applyCardMovingAverage);
   const variableExpenseTotal = baseMetrics.variableExpenseTotal.plus(cardMovingAverageAppliedExpense);
   const expenseTotal = baseMetrics.fixedExpenseTotal.plus(variableExpenseTotal);
   const monthlySurplus = baseMetrics.incomeTotal.minus(expenseTotal);
@@ -349,7 +393,7 @@ export function calculateBudgetProjection(input: {
     budgetItemVariableExpenseTotal: baseMetrics.variableExpenseTotal,
     cardMovingAverageExpense,
     cardMovingAverageAppliedExpense,
-    cardMovingAverageApplied: shouldApplyCardMovingAverage && cardMovingAverageExpense.gt(0),
+    cardMovingAverageApplied: cardMovingAverageAppliedExpense.gt(0),
     cardMovingAverageMonths: cardAverage.monthsUsed,
     cardMovingAverageWindowStartMonth: cardAverage.windowStartMonth,
     cardMovingAverageWindowEndMonth: cardAverage.windowEndMonth,
@@ -366,15 +410,44 @@ export function isBudgetItemActive(item: BudgetItemInput, periodMonth: string): 
   return true;
 }
 
+/**
+ * Média do cartão efetivamente aplicada no orçamento do mês. Um item de
+ * orçamento que substitui a fatura cobre a média da SUA pessoa (ou de todos,
+ * se for familiar); quem não tem item próprio entra pela média calculada.
+ */
+function appliedCardAverage(
+  items: BudgetItemInput[],
+  period: string,
+  cardAverage: MovingAverageExpenseMetrics,
+  override?: boolean,
+): Decimal {
+  if (override === true) return cardAverage.averageMonthly;
+  if (override === false) return ZERO;
+  const cardItems = items.filter((item) => isCardBudgetItem(item, period));
+  if (cardItems.some((item) => !item.personId)) return ZERO;
+  const covered = new Set(cardItems.map((item) => item.personId));
+  return Object.entries(cardAverage.averageByPerson)
+    .filter(([person]) => !covered.has(person))
+    .reduce((sum, [, average]) => sum.plus(average), ZERO);
+}
+
+/**
+ * Nome de item que representa a FATURA do cartão (substitui a média): "fatura"
+ * ou "cartão" + "média". Uma "Anuidade do cartão" é só uma despesa.
+ */
+export function isCardInvoiceItemName(name: string | null | undefined): boolean {
+  const normalizedName = normalizeSearchText(name ?? "");
+  return normalizedName.includes("fatura") || (normalizedName.includes("cartao") && normalizedName.includes("media"));
+}
+
 export function isCardBudgetItem(item: BudgetItemInput, periodMonth: string): boolean {
   if (item.kind !== "variable_expense") return false;
   if (item.isActive === false) return false;
   if (!isBudgetItemActive(item, periodMonth)) return false;
-  const normalizedName = normalizeSearchText(item.name ?? "");
-  return normalizedName.includes("cartao") || normalizedName.includes("fatura");
+  return isCardInvoiceItemName(item.name);
 }
 
-function normalizeSearchText(value: string): string {
+export function normalizeSearchText(value: string): string {
   return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
 }
 
@@ -384,6 +457,12 @@ export function calculatePatrimonyMetrics(input: {
   previousNetWorth?: MoneyLike | null;
   incomeTotal: MoneyLike;
   expenseTotal: MoneyLike;
+  /**
+   * Meses entre o fechamento anterior e este (1 = consecutivo). Quando um mês
+   * é pulado, a variação cobre mais de um mês de renda: a taxa de poupança
+   * patrimonial é normalizada por mês para não ser inflada/deflacionada.
+   */
+  monthsSincePrevious?: number;
 }): PatrimonyMetrics {
   let cashTotal = ZERO;
   let investmentsTotal = ZERO;
@@ -400,6 +479,7 @@ export function calculatePatrimonyMetrics(input: {
   const previousNetWorth = input.previousNetWorth === null || input.previousNetWorth === undefined ? netWorth : decimal(input.previousNetWorth);
   const monthlyVariation = netWorth.minus(previousNetWorth);
   const budgetSavings = decimal(input.incomeTotal).minus(decimal(input.expenseTotal));
+  const monthsSincePrevious = Math.max(1, Math.floor(input.monthsSincePrevious ?? 1));
 
   return {
     cashTotal,
@@ -412,20 +492,34 @@ export function calculatePatrimonyMetrics(input: {
     debtToAssets: safeRatio(debtPvTotal, assetsTotal),
     reserveMonths: safeRatio(cashTotal, input.expenseTotal),
     investmentsToAssets: safeRatio(investmentsTotal, assetsTotal),
-    patrimonialSavingsRate: safeRatio(monthlyVariation, input.incomeTotal),
+    patrimonialSavingsRate: safeRatio(monthlyVariation, decimal(input.incomeTotal).times(monthsSincePrevious)),
     budgetSavingsRate: safeRatio(budgetSavings, input.incomeTotal),
   };
 }
 
+/** Decimal a partir de entrada arbitrária, ou null se não for numérica (nunca lança). */
+function tryDecimal(value: unknown): Decimal | null {
+  if (value === null || value === undefined || value === "") return null;
+  if (typeof value !== "number" && typeof value !== "string" && !(value instanceof Decimal)) return null;
+  try {
+    const parsed = new Decimal(value);
+    return parsed.isFinite() ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
 export function calculateGoalProgress(goal: GoalInput): Decimal {
+  // Valores não numéricos (texto livre, "1.000.000" em formato BR) nunca
+  // derrubam o cálculo: viram progresso 0. Quem chama deve normalizar antes.
   if (goal.comparisonOperator === "manual") {
-    const manual = decimal(goal.currentValue as MoneyLike);
-    return Decimal.max(ZERO, Decimal.min(manual, 1));
+    const manual = tryDecimal(goal.currentValue);
+    return manual ? Decimal.max(ZERO, Decimal.min(manual, 1)) : ZERO;
   }
 
-  const current = decimal(goal.currentValue as MoneyLike);
-  const target = decimal(goal.targetValue as MoneyLike);
-  if (target.isZero()) return ZERO;
+  const current = tryDecimal(goal.currentValue);
+  const target = tryDecimal(goal.targetValue);
+  if (!current || !target || target.isZero()) return ZERO;
 
   if (goal.comparisonOperator === "greater_or_equal") {
     return Decimal.max(ZERO, Decimal.min(current.div(target), 1));
@@ -433,12 +527,27 @@ export function calculateGoalProgress(goal: GoalInput): Decimal {
 
   if (goal.comparisonOperator === "less_or_equal") {
     if (current.lessThanOrEqualTo(target)) return new Decimal(1);
-    const riskCap = goal.riskCapValue ? decimal(goal.riskCapValue) : target.times(2);
+    const riskCap = tryDecimal(goal.riskCapValue) ?? target.times(2);
     if (riskCap.lessThanOrEqualTo(target)) return ZERO;
     return Decimal.max(ZERO, new Decimal(1).minus(current.minus(target).div(riskCap.minus(target))));
   }
 
   return current.equals(target) ? new Decimal(1) : ZERO;
+}
+
+export type GoalHorizonKey = "short" | "medium" | "long";
+export type GoalStatusKey = "achieved" | "in_progress" | "attention" | "long_term";
+
+/**
+ * Status por horizonte, nas mesmas faixas da aba Metas da planilha:
+ * curto prazo abaixo de 70% pede atenção; médio/longo prazo com pouco
+ * progresso é "longo prazo" (não um alarme) — 50% no médio, 10% no longo.
+ */
+export function goalStatusFor(progress: number, horizon: GoalHorizonKey): GoalStatusKey {
+  if (progress >= 1) return "achieved";
+  if (horizon === "short") return progress >= 0.7 ? "in_progress" : "attention";
+  if (horizon === "medium") return progress >= 0.5 ? "in_progress" : "long_term";
+  return progress >= 0.1 ? "in_progress" : "long_term";
 }
 
 export function calculateRequiredCagr(currentValue: MoneyLike, targetValue: MoneyLike, yearsRemaining: MoneyLike): Decimal {

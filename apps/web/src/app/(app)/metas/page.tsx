@@ -14,8 +14,10 @@ export default async function MetasPage({
 }) {
   const householdId = await getRequiredPageHouseholdId();
   const params = await searchParams;
+  // Só meses fechados: um rascunho em andamento (saldos ainda em R$ 0) não
+  // serve de referência para as metas.
   const snapshots = await prisma.monthlySnapshot.findMany({
-    where: { householdId },
+    where: { householdId, status: { in: ["closed", "revised"] } },
     orderBy: { periodMonth: "asc" },
     select: { periodMonth: true },
   });

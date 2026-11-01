@@ -12,7 +12,7 @@ export async function GET(request: Request) {
     const { searchParams } = new URL(request.url);
     const requestedPeriod = searchParams.get("period_month");
     const latestSnapshot = await prisma.monthlySnapshot.findFirst({
-      where: { householdId },
+      where: { householdId, status: { in: ["closed", "revised"] } },
       orderBy: [{ periodMonth: "desc" }, { revisionNumber: "desc" }],
     });
     const periodMonth = requestedPeriod ? asMonthStart(requestedPeriod) : latestSnapshot?.periodMonth ?? new Date();

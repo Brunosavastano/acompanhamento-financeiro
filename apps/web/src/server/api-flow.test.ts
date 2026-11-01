@@ -345,6 +345,24 @@ describe.skipIf(!runDbTests)("API route integration flows", () => {
     expect(februaryBudget.metrics.variableExpenseTotal).toBe(1200);
     expect(februaryBudget.metrics.cardMovingAverageExpense).toBe(0);
 
+    // A projeção de março feita na base de fevereiro NÃO é gasto realizado de
+    // março (regra da planilha: só a fatura declarada no próprio mês conta).
+    const marchBeforeDeclaration = await (await getBudget(new Request("http://test.local/api/budget?period_month=2035-03"))).json();
+    expect(marchBeforeDeclaration.metrics.cardMovingAverageExpense).toBe(0);
+    expect(marchBeforeDeclaration.metrics.cardMovingAverageMonths).toBe(0);
+
+    const marchDeclarationResponse = await createDebt(
+      jsonRequest({
+        personId: bruno.id,
+        cardName: "Cartao principal",
+        invoiceMonth: "2035-03",
+        paymentMonth: "2035-03",
+        amount: 1000,
+        description: "Fatura atual de março",
+      }),
+    );
+    expect(marchDeclarationResponse.status).toBe(201);
+
     const marchBudgetResponse = await getBudget(new Request("http://test.local/api/budget?period_month=2035-03"));
     expect(marchBudgetResponse.status).toBe(200);
     const marchBudget = await marchBudgetResponse.json();
@@ -427,7 +445,7 @@ describe.skipIf(!runDbTests)("API route integration flows", () => {
     expect(backupResponse.status).toBe(200);
     const backup = await backupResponse.json();
     expect(backup.auditLogs.length).toBeGreaterThan(0);
-    expect(backup.debtCashflows).toHaveLength(1);
+    expect(backup.debtCashflows).toHaveLength(2);
     expect(backup.interestRates).toHaveLength(1);
     expect(Number(backup.interestRates[0].annualRate)).toBe(0.12);
     expect(backup.goals.some((row: { title: string }) => row.title === "R$ 500 mil")).toBe(false);
@@ -589,6 +607,188 @@ describe.skipIf(!runDbTests)("API route integration flows", () => {
       jsonRequest({ personId: bruno.id, cardName: "Cartão principal", invoiceMonth: "2036-10", paymentMonth: "2036-11", amount: 50 }),
     );
     expect(reopenedCreateResponse.status).toBe(201);
+  });
+
+  it("keeps calculations faithful across skipped months, manual goals, duplicate accounts and accentless card names", async () => {
+    const bruno = await prisma.person.findFirstOrThrow({ where: { householdId: mockedAuth.householdId, name: "Bruno" }, include: { accounts: true } });
+    const brunoAccount = bruno.accounts[0];
+
+    const incomeResponse = await createBudget(
+      jsonRequest({ personId: bruno.id, name: "Salário", kind: "income", amountMonthly: 1000, recurrence: "monthly", startMonth: "2037-01", isActive: true }),
+    );
+    expect(incomeResponse.status).toBe(201);
+
+    // Janeiro com DUAS linhas na mesma conta (ex.: duas caixas) e fechamento.
+    const january = await (await createSnapshot(jsonRequest({ periodMonth: "2037-01", selicAnnual: 0.12 }))).json();
+    const extraLine = await (
+      await createPosition(
+        jsonRequest({ personId: bruno.id, accountId: brunoAccount.id, category: "cash", amount: 0 }),
+        routeParams({ id: january.id }),
+      )
+    ).json();
+    const januaryPositions = await prisma.position.findMany({ where: { snapshotId: january.id } });
+    for (const position of januaryPositions) {
+      const amount = position.id === extraLine.id ? 300 : position.accountId === brunoAccount.id ? 700 : 0;
+      await updatePosition(
+        jsonRequest({ personId: position.personId, accountId: position.accountId, category: position.category, amount }),
+        routeParams({ id: january.id, positionId: position.id }),
+      );
+    }
+    expect((await closeSnapshot(new Request("http://test.local", { method: "POST" }), routeParams({ id: january.id }))).status).toBe(200);
+
+    // Meta manual (progresso informado em janeiro) e meta numérica sem métrica do app.
+    const manualGoal = await (
+      await createGoal(
+        jsonRequest({ title: "CFA", horizon: "medium", metricKey: "cfa", targetValue: "Charterholder", comparisonOperator: "manual", manualCurrentValue: "Estudando" }),
+      )
+    ).json();
+    expect(
+      (
+        await updateGoalProgress(
+          jsonRequest({ periodMonth: "2037-01", currentValue: "Aprovado L2", progressPct: 0.33, status: "in_progress" }),
+          routeParams({ id: manualGoal.id }),
+        )
+      ).status,
+    ).toBe(200);
+    const incomeGoal = await (
+      await createGoal(
+        jsonRequest({
+          title: "Renda 30k",
+          horizon: "medium",
+          metricKey: "renda_liquida_mensal",
+          targetValue: 30000,
+          comparisonOperator: "greater_or_equal",
+          manualCurrentValue: "12000",
+        }),
+      )
+    ).json();
+    await updateGoalProgress(jsonRequest({ periodMonth: "2037-01", currentValue: "16500", progressPct: 0.5 }), routeParams({ id: incomeGoal.id }));
+    // Alvo digitado em formato brasileiro não pode derrubar o cálculo.
+    const brGoal = await createGoal(
+      jsonRequest({ title: "PL 1 milhão", horizon: "long", metricKey: "pl_total", targetValue: "1.000.000", comparisonOperator: "greater_or_equal" }),
+    );
+    expect(brGoal.status).toBe(201);
+
+    // Março (fevereiro NÃO foi fechado). O rascunho herda as duas linhas da conta.
+    const march = await (await createSnapshot(jsonRequest({ periodMonth: "2037-03", selicAnnual: 0.12 }))).json();
+    const marchLines = await prisma.position.findMany({ where: { snapshotId: march.id, accountId: brunoAccount.id } });
+    expect(marchLines).toHaveLength(2);
+    for (const position of await prisma.position.findMany({ where: { snapshotId: march.id } })) {
+      const amount = position.accountId === brunoAccount.id ? (position.id === marchLines[0].id ? 1000 : 400) : 0;
+      await updatePosition(
+        jsonRequest({ personId: position.personId, accountId: position.accountId, category: position.category, amount }),
+        routeParams({ id: march.id, positionId: position.id }),
+      );
+    }
+
+    // Fatura importada sem acento + re-declaração com acento: mesma fatura, sem somar em dobro.
+    await prisma.debtCashflow.create({
+      data: {
+        householdId: mockedAuth.householdId,
+        personId: bruno.id,
+        cardName: "Cartao principal",
+        invoiceMonth: new Date("2037-02-01T00:00:00.000Z"),
+        paymentMonth: new Date("2037-03-01T00:00:00.000Z"),
+        amount: 500,
+        source: "import",
+      },
+    });
+    await createDebt(jsonRequest({ personId: bruno.id, cardName: "Cartão principal", invoiceMonth: "2037-03", paymentMonth: "2037-03", amount: 800 }));
+
+    const preview = await (await previewSnapshot(new Request("http://test.local"), routeParams({ id: march.id }))).json();
+    // PL jan = 1000; PL mar = 1400 − 800 (fatura de março a valor presente, sem desconto) = 600.
+    expect(preview.kpis.netWorth).toBe(600);
+    expect(preview.kpis.monthlyVariation).toBe(-400);
+    expect(preview.kpis.monthsSincePrevious).toBe(2);
+    expect(preview.kpis.previousPeriodMonth).toBe("2037-01-01");
+    // A variação cobre 2 meses de renda: −400 / (1000 × 2).
+    expect(preview.kpis.patrimonialSavingsRate).toBe(-0.2);
+    expect(preview.debt.monthlyInvoiceTotal).toBe(800);
+
+    expect((await closeSnapshot(new Request("http://test.local", { method: "POST" }), routeParams({ id: march.id }))).status).toBe(200);
+
+    const goals = await (await listGoals(new Request("http://test.local/api/goals?period_month=2037-03"))).json();
+    const cfa = goals.find((goal: { id: string }) => goal.id === manualGoal.id);
+    expect(cfa).toMatchObject({ currentValue: "Aprovado L2", progressPct: 0.33, progressSource: "manual" });
+    const income = goals.find((goal: { id: string }) => goal.id === incomeGoal.id);
+    expect(income).toMatchObject({ currentValue: "16500", progressPct: 0.55, status: "in_progress" });
+    const millionGoal = goals.find((goal: { title: string }) => goal.title === "PL 1 milhão");
+    expect(millionGoal.progressPct).toBeCloseTo(0.0006, 6);
+    expect(millionGoal.status).toBe("long_term");
+
+    // O fechamento grava o histórico só das metas calculadas pelo app. A meta
+    // manual NÃO ganha cópia em março: o registro de janeiro segue valendo.
+    const marchStart = new Date("2037-03-01T00:00:00.000Z");
+    expect(
+      await prisma.goalProgressSnapshot.findUnique({ where: { goalId_periodMonth: { goalId: manualGoal.id, periodMonth: marchStart } } }),
+    ).toBeNull();
+    expect(
+      await prisma.goalProgressSnapshot.findUnique({ where: { goalId_periodMonth: { goalId: millionGoal.id, periodMonth: marchStart } } }),
+    ).not.toBeNull();
+
+    // Meta calculada não aceita progresso digitado (o valor vem do fechamento).
+    const computedProgressResponse = await updateGoalProgress(
+      jsonRequest({ periodMonth: "2037-03", currentValue: "999999", progressPct: 0.9 }),
+      routeParams({ id: millionGoal.id }),
+    );
+    expect(computedProgressResponse.status).toBe(409);
+
+    // Sem cópia automática, corrigir janeiro chega a março...
+    await updateGoalProgress(
+      jsonRequest({ periodMonth: "2037-01", currentValue: "Estudando L1", progressPct: 0.1, status: "in_progress" }),
+      routeParams({ id: manualGoal.id }),
+    );
+    const marchAfterFix = await (await listGoals(new Request("http://test.local/api/goals?period_month=2037-03"))).json();
+    expect(marchAfterFix.find((goal: { id: string }) => goal.id === manualGoal.id)).toMatchObject({ currentValue: "Estudando L1", progressPct: 0.1 });
+
+    // ...mas um registro do próprio mês tem prioridade: corrigir um mês PASSADO
+    // não sobrescreve o valor de um mês mais recente.
+    await updateGoalProgress(
+      jsonRequest({ periodMonth: "2037-03", currentValue: "Aprovado L3", progressPct: 0.66, status: "in_progress" }),
+      routeParams({ id: manualGoal.id }),
+    );
+    await updateGoalProgress(
+      jsonRequest({ periodMonth: "2037-01", currentValue: "Estudando L2", progressPct: 0.2, status: "in_progress" }),
+      routeParams({ id: manualGoal.id }),
+    );
+    const marchAfterBackfill = await (await listGoals(new Request("http://test.local/api/goals?period_month=2037-03"))).json();
+    expect(marchAfterBackfill.find((goal: { id: string }) => goal.id === manualGoal.id)).toMatchObject({ currentValue: "Aprovado L3", progressPct: 0.66 });
+    const januaryGoals = await (await listGoals(new Request("http://test.local/api/goals?period_month=2037-01"))).json();
+    expect(januaryGoals.find((goal: { id: string }) => goal.id === manualGoal.id)).toMatchObject({ currentValue: "Estudando L2", progressPct: 0.2 });
+    // O valor inicial da meta (sem data) não é reescrito pelos registros mensais
+    // e só aparece antes do primeiro registro.
+    expect((await prisma.goal.findUniqueOrThrow({ where: { id: manualGoal.id } })).manualCurrentValue).toBe("Estudando");
+    const beforeFirstRecord = await (await listGoals(new Request("http://test.local/api/goals?period_month=2036-12"))).json();
+    expect(beforeFirstRecord.find((goal: { id: string }) => goal.id === manualGoal.id)).toMatchObject({ currentValue: "Estudando", progressSource: "manual" });
+    expect(beforeFirstRecord.find((goal: { id: string }) => goal.id === incomeGoal.id)).toMatchObject({ currentValue: "12000", progressPct: 0.4 });
+
+    // Editar a meta (sem enviar o valor atual) não apaga o valor inicial nem o informado.
+    const editResponse = await updateGoal(
+      jsonRequest({
+        title: "Renda 30k (editada)",
+        horizon: "medium",
+        metricKey: "renda_liquida_mensal",
+        targetValue: 30000,
+        comparisonOperator: "greater_or_equal",
+        riskCapValue: null,
+        notes: null,
+      }),
+      routeParams({ id: incomeGoal.id }),
+    );
+    expect(editResponse.status).toBe(200);
+    expect((await prisma.goal.findUniqueOrThrow({ where: { id: incomeGoal.id } })).manualCurrentValue).toBe("12000");
+    const marchAfterEdit = await (await listGoals(new Request("http://test.local/api/goals?period_month=2037-03"))).json();
+    expect(marchAfterEdit.find((goal: { id: string }) => goal.id === incomeGoal.id)).toMatchObject({ currentValue: "16500", progressPct: 0.55 });
+
+    // Excluir uma revisão em rascunho devolve o fechamento de origem a "fechado".
+    const revision = await (await reviseSnapshot(jsonRequest({ notes: "Conferir março" }), routeParams({ id: march.id }))).json();
+    expect((await prisma.monthlySnapshot.findUniqueOrThrow({ where: { id: march.id } })).status).toBe("revised");
+    const deleteRevisionResponse = await deleteSnapshot(new Request("http://test.local", { method: "DELETE" }), routeParams({ id: revision.id }));
+    expect(deleteRevisionResponse.status).toBe(200);
+    expect(await deleteRevisionResponse.json()).toMatchObject({ ok: true, restoredSnapshotId: march.id });
+    expect((await prisma.monthlySnapshot.findUniqueOrThrow({ where: { id: march.id } })).status).toBe("closed");
+    // ...e o mês volta a poder ser revisado.
+    expect((await reviseSnapshot(jsonRequest({ notes: "Revisar de novo" }), routeParams({ id: march.id }))).status).toBe(201);
   });
 
   it("manages people and accounts through settings API routes", async () => {

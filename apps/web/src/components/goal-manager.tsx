@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Loader2, Pencil, Plus, Save, Trash2, X } from "lucide-react";
 import { clsx } from "clsx";
 import { currency, number, percent } from "@/lib/format";
+import { parseLooseNumber } from "@/lib/number-br";
 import { Input, Select } from "@/components/ui";
 
 type Goal = {
@@ -19,7 +20,12 @@ type Goal = {
   progressPct: number;
   status: string;
   currentValue: string | null;
+  /** Números já interpretados pelo servidor (formato certo para cada origem). */
+  currentNumeric: number | null;
+  targetNumeric: number | null;
   progressSource: "manual" | "calculated" | "empty";
+  /** Meta com métrica do app: o valor atual vem do fechamento, não de digitação. */
+  isComputed: boolean;
   requiredCagr: number | null;
 };
 
@@ -35,7 +41,6 @@ type GoalForm = {
 };
 
 type ProgressStatus = "achieved" | "in_progress" | "attention" | "long_term";
-type GoalEditForm = GoalForm & { manualCurrentValue: string };
 
 type Tone = "gold" | "green" | "rose" | "slate";
 
@@ -57,16 +62,15 @@ function goalPresentation(goal: Goal): { tone: Tone; pill: string } {
 const percentKeys = new Set(["invest_ativos", "divida_ativos", "tx_poupanca"]);
 const moneyKeys = new Set(["pl_total", "invest_total", "caixa_total"]);
 
-function formatGoalValue(metricKey: string, value: string | null) {
-  if (value === null || value.trim() === "") return "—";
-  // Valores da API usam ponto decimal ("4.96"); só interpreta como pt-BR se Number falhar.
-  const direct = Number(value);
-  const numeric = Number.isFinite(direct) ? direct : Number(value.replace(/\./g, "").replace(",", "."));
-  if (!Number.isFinite(numeric)) return value;
+function formatGoalValue(metricKey: string, numeric: number | null, raw: string | null) {
+  // O servidor já interpretou o número no formato certo (Decimal canônico ou
+  // texto pt-BR digitado); sem número, mostra o texto como foi informado.
+  if (numeric === null || !Number.isFinite(numeric)) return raw && raw.trim() !== "" ? raw : "—";
   if (percentKeys.has(metricKey)) return percent(numeric, 1);
   if (moneyKeys.has(metricKey)) return currency(numeric);
   if (metricKey === "meses_de_reserva") return `${number(numeric, 1)} meses`;
-  return number(numeric, Number.isInteger(numeric) ? 0 : 2);
+  // Metas manuais: mostra o número como foi informado (até 6 casas), sem arredondar 0,125 para 0,13.
+  return new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 6 }).format(numeric);
 }
 
 function formatDeadline(targetDate: string | null) {
@@ -111,7 +115,7 @@ export function GoalManager({ period, initialGoals }: { period: string; initialG
   const [form, setForm] = useState<GoalForm>(emptyGoalForm("short"));
   const [isCreating, setIsCreating] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [editForm, setEditForm] = useState<GoalEditForm | null>(null);
+  const [editForm, setEditForm] = useState<GoalForm | null>(null);
   const [savingId, setSavingId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [progressId, setProgressId] = useState<string | null>(null);
@@ -142,7 +146,7 @@ export function GoalManager({ period, initialGoals }: { period: string; initialG
       const response = await fetch("/api/goals", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify(serializeGoalForm(form, "0")),
+        body: JSON.stringify(serializeGoalForm(form, "create")),
       });
       if (!response.ok) {
         setMessage("Não foi possível criar a meta.");
@@ -164,12 +168,12 @@ export function GoalManager({ period, initialGoals }: { period: string; initialG
       title: goal.title,
       horizon: normalizeHorizon(goal.horizon),
       metricKey: goal.metricKey,
-      targetValue: goal.targetValue ?? "",
+      // números em formato pt-BR no campo (0,125 / 500000): salvar de novo não muda o valor
+      targetValue: goal.targetNumeric !== null ? toFormNumber(goal.targetNumeric) : goal.targetValue ?? "",
       targetDate: goal.targetDate ?? "",
       comparisonOperator: goal.comparisonOperator,
-      riskCapValue: goal.riskCapValue ?? "",
+      riskCapValue: goal.riskCapValue !== null && Number.isFinite(Number(goal.riskCapValue)) ? toFormNumber(Number(goal.riskCapValue)) : "",
       notes: isStatusMarker(goal.notes) ? "" : goal.notes ?? "",
-      manualCurrentValue: goal.currentValue ?? "",
     });
     setMessage(null);
   }
@@ -187,7 +191,7 @@ export function GoalManager({ period, initialGoals }: { period: string; initialG
       const response = await fetch(`/api/goals/${goalId}`, {
         method: "PUT",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify(serializeGoalForm(editForm, editForm.manualCurrentValue)),
+        body: JSON.stringify(serializeGoalForm(editForm, "edit")),
       });
       if (!response.ok) {
         setMessage("Não foi possível atualizar a meta.");
@@ -280,9 +284,7 @@ export function GoalManager({ period, initialGoals }: { period: string; initialG
                     <GoalFormCard
                       key={goal.id}
                       form={editForm}
-                      setForm={(next) => setEditForm({ ...next, manualCurrentValue: (next as GoalEditForm).manualCurrentValue ?? editForm.manualCurrentValue })}
-                      manualCurrentValue={editForm.manualCurrentValue}
-                      setManualCurrentValue={(value) => setEditForm({ ...editForm, manualCurrentValue: value })}
+                      setForm={(next) => setEditForm(next)}
                       busy={savingId === goal.id}
                       submitLabel="Salvar"
                       onSubmit={() => void saveGoal(goal.id)}
@@ -308,8 +310,8 @@ export function GoalManager({ period, initialGoals }: { period: string; initialG
                       </div>
                     </div>
                     <div className="flex overflow-hidden rounded-[10px] border border-edge-soft bg-surface-2">
-                      <GoalStat label="Atual" value={formatGoalValue(goal.metricKey, goal.currentValue)} />
-                      <GoalStat label="Alvo" value={formatGoalValue(goal.metricKey, goal.targetValue)} withBorder />
+                      <GoalStat label="Atual" value={formatGoalValue(goal.metricKey, goal.currentNumeric, goal.currentValue)} />
+                      <GoalStat label="Alvo" value={formatGoalValue(goal.metricKey, goal.targetNumeric, goal.targetValue)} withBorder />
                       <GoalStat label="Prazo" value={formatDeadline(goal.targetDate)} withBorder />
                     </div>
                     {goal.requiredCagr !== null ? (
@@ -369,7 +371,7 @@ export function GoalManager({ period, initialGoals }: { period: string; initialG
                           </button>
                         </div>
                         <p className="mt-2 text-[10px] leading-[14px] text-faint">
-                          O progresso manual vale para o mês de referência e substitui o valor calculado.
+                          O valor informado vale a partir do mês de referência, até a próxima atualização.
                         </p>
                       </div>
                     ) : null}
@@ -382,13 +384,16 @@ export function GoalManager({ period, initialGoals }: { period: string; initialG
                         <IconButton label={`Remover meta ${goal.title}`} danger disabled={deletingId === goal.id} onClick={() => void deleteGoal(goal.id)}>
                           {deletingId === goal.id ? <Loader2 className="h-[13px] w-[13px] animate-spin" /> : <Trash2 className="h-[13px] w-[13px]" />}
                         </IconButton>
-                        <button
-                          type="button"
-                          onClick={() => (progressId === goal.id ? setProgressId(null) : openProgress(goal))}
-                          className="focus-ring ml-1 rounded-lg border border-edge px-3 py-1.5 text-[11px] font-semibold text-body hover:border-gold hover:text-gold-light"
-                        >
-                          Atualizar progresso
-                        </button>
+                        {/* Metas com métrica do app se atualizam sozinhas a cada fechamento. */}
+                        {!goal.isComputed ? (
+                          <button
+                            type="button"
+                            onClick={() => (progressId === goal.id ? setProgressId(null) : openProgress(goal))}
+                            className="focus-ring ml-1 rounded-lg border border-edge px-3 py-1.5 text-[11px] font-semibold text-body hover:border-gold hover:text-gold-light"
+                          >
+                            Atualizar progresso
+                          </button>
+                        ) : null}
                       </div>
                     </div>
                   </article>
@@ -467,8 +472,6 @@ function GoalStat({ label, value, withBorder }: { label: string; value: string; 
 function GoalFormCard({
   form,
   setForm,
-  manualCurrentValue,
-  setManualCurrentValue,
   busy,
   submitLabel,
   onSubmit,
@@ -476,8 +479,6 @@ function GoalFormCard({
 }: {
   form: GoalForm;
   setForm: (form: GoalForm) => void;
-  manualCurrentValue?: string;
-  setManualCurrentValue?: (value: string) => void;
   busy: boolean;
   submitLabel: string;
   onSubmit: ((event: React.FormEvent<HTMLFormElement>) => void) | (() => void);
@@ -544,13 +545,8 @@ function GoalFormCard({
           className="w-full bg-surface"
         />
       ) : null}
-      {form.comparisonOperator === "manual" && setManualCurrentValue ? (
-        <Input
-          placeholder="Valor/status atual"
-          value={manualCurrentValue ?? ""}
-          onChange={(event) => setManualCurrentValue(event.target.value)}
-          className="w-full bg-surface"
-        />
+      {form.comparisonOperator === "manual" ? (
+        <p className="text-[10px] leading-[14px] text-faint">O valor atual de metas manuais é informado em "Atualizar progresso", mês a mês.</p>
       ) : null}
       <div className="mt-1 flex justify-end gap-2">
         <button
@@ -580,8 +576,7 @@ function normalizeHorizon(value: string): GoalForm["horizon"] {
   return "short";
 }
 
-function serializeGoalForm(source: GoalForm, manualCurrentValue: string | null = null) {
-  const numericRisk = Number(source.riskCapValue.replace(",", "."));
+function serializeGoalForm(source: GoalForm, mode: "create" | "edit") {
   return {
     title: source.title,
     horizon: source.horizon,
@@ -589,17 +584,24 @@ function serializeGoalForm(source: GoalForm, manualCurrentValue: string | null =
     targetValue: parseFlexibleTarget(source.targetValue),
     targetDate: source.targetDate || null,
     comparisonOperator: source.comparisonOperator,
-    riskCapValue: source.riskCapValue.trim() && Number.isFinite(numericRisk) ? numericRisk : null,
-    manualCurrentValue: source.comparisonOperator === "manual" ? manualCurrentValue : null,
+    riskCapValue: parseLooseNumber(source.riskCapValue),
+    // Na edição o valor atual não é enviado: ele vive nos registros de progresso
+    // (com mês) e editar o título não pode apagá-lo.
+    ...(mode === "create" ? { manualCurrentValue: null } : {}),
     notes: source.notes || null,
   };
 }
 
+/** Número no formato do campo de texto (vírgula decimal, sem milhar): relido igual ao salvar. */
+function toFormNumber(value: number) {
+  return String(value).replace(".", ",");
+}
+
+/** Alvo numérico quando der para entender ("1.000.000", "500.000,00", "10%"); senão, texto livre (ex.: "Level II"). */
 function parseFlexibleTarget(value: string) {
   const trimmed = value.trim();
-  const numericTarget = Number(trimmed.replace(",", "."));
-  if (trimmed !== "" && Number.isFinite(numericTarget)) return numericTarget;
-  return trimmed || null;
+  if (trimmed === "") return null;
+  return parseLooseNumber(trimmed) ?? trimmed;
 }
 
 function IconButton({

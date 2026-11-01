@@ -1,5 +1,5 @@
 import { importExcelSchema } from "@finance/shared-types";
-import { getRequiredHouseholdId } from "@/lib/authz";
+import { getCurrentUserId, getRequiredHouseholdId } from "@/lib/authz";
 import { errorResponse, json } from "@/lib/api";
 import { runExcelImport, saveUploadToTemp } from "@/server/import-excel";
 
@@ -22,7 +22,7 @@ export async function POST(request: Request) {
     }
 
     if (!filePath) return json({ error: "Informe filePath ou configure DEFAULT_EXCEL_PATH." }, { status: 400 });
-    const job = await runExcelImport({ householdId, filePath });
+    const job = await runExcelImport({ householdId, filePath, userId: await getCurrentUserId() });
     return json(job, { status: 201 });
   } catch (error) {
     return errorResponse(error);

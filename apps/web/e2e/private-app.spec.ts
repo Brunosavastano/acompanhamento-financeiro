@@ -68,8 +68,16 @@ test.describe.serial("private finance app", () => {
     await page.getByRole("button", { name: "Adicionar", exact: true }).click();
     await expect(page.getByText("Posição adicionada ao rascunho.")).toBeVisible({ timeout: 30_000 });
 
-    await page.getByRole("button", { name: "Remover posição Cashback", exact: true }).last().click();
+    // Duas linhas na mesma conta ganham numeração: "Cashback (1)" e "Cashback (2)".
+    await expect(page.getByLabel("Saldo de Bruno — Cashback (2)", { exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "Remover posição Cashback (2)", exact: true }).click();
     await expect(page.getByText("Posição removida do rascunho.")).toBeVisible({ timeout: 30_000 });
+
+    // Campo em branco não vira R$ 0 em silêncio: o app bloqueia e aponta qual é.
+    await page.getByLabel("Saldo de Bruno — VR", { exact: true }).fill("");
+    await page.getByRole("button", { name: "Salvar e revisar" }).click();
+    await expect(page.getByText(/Preencha os saldos em branco .*Bruno — VR/)).toBeVisible();
+    await page.getByLabel("Saldo de Bruno — VR", { exact: true }).fill("0");
 
     // Passo 2 — saldos por conta.
     await page.getByLabel("Saldo de Bruno — Nubank", { exact: true }).fill("10000");
@@ -77,16 +85,24 @@ test.describe.serial("private finance app", () => {
     await page.getByLabel("Saldo de Tatiane — Caixa", { exact: true }).fill("5000");
     await page.getByLabel("Saldo de Tatiane — Investimentos", { exact: true }).fill("15000");
 
+    // Contas que tinham saldo no mês anterior e ficaram em R$ 0 pedem uma
+    // confirmação explícita (window.confirm) antes de salvar.
+    const zeroWarning = nextDialogMessage(page);
     await page.getByRole("button", { name: "Salvar e revisar" }).click();
+    expect(await zeroWarning).toMatch(/Confira estes saldos antes de salvar/);
     await expect(page.getByText("Saldos e notas salvos; prévia recalculada.")).toBeVisible({ timeout: 30_000 });
 
-    // Passo 3 — revisão de dívidas e orçamento.
+    // Passo 3 — revisão de dívidas e orçamento. Quem tinha dívida no último
+    // fechamento e não declarou nada nesta base recebe um aviso.
     await expect(page.getByRole("heading", { name: "Cartão e dívidas" })).toBeVisible();
+    await expect(page.getByText(/Nenhuma dívida declarada nesta base para/)).toBeVisible();
     await page.getByRole("button", { name: "Ir para o fechamento" }).click();
 
-    // Passo 4 — fechamento.
+    // Passo 4 — fechamento (sem as dívidas da base, pede confirmação).
     await expect(page.getByRole("heading", { name: "Fechar fevereiro" })).toBeVisible();
+    const debtWarning = nextDialogMessage(page);
     await page.getByRole("button", { name: "Fechar fevereiro", exact: true }).click();
+    expect(await debtWarning).toMatch(/Fechar mesmo assim\?/);
     await expect(page.getByText("Mês fechado com sucesso.")).toBeVisible({ timeout: 30_000 });
     await expect(page.getByRole("heading", { name: "fevereiro está fechado" })).toBeVisible();
 
@@ -142,6 +158,16 @@ test.describe.serial("private finance app", () => {
     await expect(page.getByText("R$ 1.300,00").first()).toBeVisible();
   });
 });
+
+/** Aceita o próximo window.confirm da página e devolve o texto exibido. */
+function nextDialogMessage(page: Page) {
+  return new Promise<string>((resolve) => {
+    page.once("dialog", (dialog) => {
+      resolve(dialog.message());
+      void dialog.accept();
+    });
+  });
+}
 
 async function login(page: Page) {
   await page.goto("/login");

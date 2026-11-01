@@ -18,6 +18,7 @@ type HistoryRow = {
   debtPvTotal: number;
   netWorth: number;
   monthlyVariation: number;
+  monthsSincePrevious: number;
   debtToAssets: number;
   reserveMonths: number;
   patrimonialSavingsRate: number;
@@ -203,8 +204,10 @@ export function BalanceSheetManager({ history }: { history: HistoryRow[] }) {
                     "justify-self-end rounded-full px-2.5 py-0.5 text-[11px] font-semibold tabular-nums",
                     row.monthlyVariation >= 0 ? "bg-positive/[0.12] text-positive-text" : "bg-negative/[0.12] text-negative-text",
                   )}
+                  title={row.monthsSincePrevious > 1 ? `Variação de ${row.monthsSincePrevious} meses (houve mês sem fechamento)` : undefined}
                 >
                   {signedCurrency(row.monthlyVariation)}
+                  {row.monthsSincePrevious > 1 ? ` · ${row.monthsSincePrevious}m` : ""}
                 </span>
                 <span className="text-right text-xs tabular-nums text-muted">{number(row.reserveMonths, 1)} meses</span>
                 <button
@@ -243,7 +246,7 @@ export function BalanceSheetManager({ history }: { history: HistoryRow[] }) {
             <div className="mt-4 grid grid-cols-2 gap-3">
               <DetailKpi label="Patrimônio" value={currency(selectedRow.netWorth)} />
               <DetailKpi
-                label="Variação"
+                label={selectedRow.monthsSincePrevious > 1 ? `Variação (${selectedRow.monthsSincePrevious} meses)` : "Variação"}
                 value={signedCurrency(selectedRow.monthlyVariation)}
                 tone={selectedRow.monthlyVariation >= 0 ? "positive" : "negative"}
               />

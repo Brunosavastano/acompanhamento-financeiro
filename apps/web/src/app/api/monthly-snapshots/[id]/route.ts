@@ -86,9 +86,30 @@ export async function DELETE(_request: Request, { params }: { params: Promise<{ 
     });
     if (current.status !== "draft") return json({ error: "Somente rascunhos podem ser excluídos." }, { status: 409 });
 
-    await prisma.monthlySnapshot.delete({ where: { id } });
+    // Excluir uma revisão em rascunho devolve o fechamento de origem a
+    // "fechado" — senão o mês ficava "revisado" sem revisão e sem como revisar de novo.
+    const restored = await prisma.$transaction(async (tx) => {
+      await tx.monthlySnapshot.delete({ where: { id } });
+      if (!current.revisedFromId) return null;
+      const source = await tx.monthlySnapshot.findFirst({ where: { id: current.revisedFromId, householdId, status: "revised" } });
+      if (!source) return null;
+      const reopened = await tx.monthlySnapshot.update({ where: { id: source.id }, data: { status: "closed" } });
+      await audit(
+        {
+          userId,
+          entityType: "monthly_snapshot",
+          entityId: source.id,
+          action: "update",
+          oldValue: source,
+          newValue: reopened,
+          reason: "Revisão em rascunho excluída: fechamento de origem volta a valer.",
+        },
+        tx,
+      );
+      return reopened;
+    });
     await audit({ userId, entityType: "monthly_snapshot", entityId: id, action: "delete", oldValue: current });
-    return json({ ok: true });
+    return json({ ok: true, restoredSnapshotId: restored?.id ?? null });
   } catch (error) {
     return errorResponse(error);
   }

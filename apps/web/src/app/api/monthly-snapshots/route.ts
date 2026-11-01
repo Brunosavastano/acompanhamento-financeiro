@@ -44,10 +44,26 @@ export async function POST(request: Request) {
       );
     }
 
-    const accounts = await prisma.account.findMany({
-      where: { person: { householdId }, isActive: true },
-      include: { person: true },
-    });
+    const [accounts, previousClosed] = await Promise.all([
+      prisma.account.findMany({
+        where: { person: { householdId }, isActive: true },
+        include: { person: true },
+        orderBy: [{ person: { name: "asc" } }, { name: "asc" }],
+      }),
+      prisma.monthlySnapshot.findFirst({
+        where: { householdId, periodMonth: { lt: periodMonth }, status: { in: ["closed", "revised"] } },
+        orderBy: [{ periodMonth: "desc" }, { revisionNumber: "desc" }],
+        include: { positions: { select: { accountId: true } } },
+      }),
+    ]);
+    // O rascunho herda a ESTRUTURA do último fechamento: uma conta com duas
+    // linhas no mês anterior (ex.: duas caixas na mesma conta) volta com duas
+    // linhas — antes a segunda sumia e era fácil esquecê-la.
+    const linesByAccount = new Map<string, number>();
+    for (const position of previousClosed?.positions ?? []) {
+      if (position.accountId) linesByAccount.set(position.accountId, (linesByAccount.get(position.accountId) ?? 0) + 1);
+    }
+    const draftLines = accounts.flatMap((account) => Array.from({ length: Math.max(1, linesByAccount.get(account.id) ?? 1) }, () => account));
 
     const { hydratedSnapshot, interestRateChange } = await prisma.$transaction(async (tx) => {
       const snapshot = await tx.monthlySnapshot.create({
@@ -61,7 +77,7 @@ export async function POST(request: Request) {
       });
 
       await tx.position.createMany({
-        data: accounts.map((account) => ({
+        data: draftLines.map((account) => ({
           snapshotId: snapshot.id,
           personId: account.personId,
           accountId: account.id,
