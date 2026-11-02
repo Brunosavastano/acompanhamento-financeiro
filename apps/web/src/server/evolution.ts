@@ -7,7 +7,7 @@ import {
   type DebtCashflowInput,
 } from "@finance/financial-calculations";
 import { prisma } from "@/lib/prisma";
-import { formatPeriod } from "@/lib/date";
+import { asMonthStart, formatPeriod, parseMonthOrNull } from "@/lib/date";
 import { toDecimalNumber } from "@/lib/format";
 import type { EvolutionAccount, EvolutionData } from "@/lib/evolution";
 
@@ -89,6 +89,7 @@ export async function getEvolutionData(householdId: string, periodMonth: Date): 
   const money = (value: { toNumber(): number } | null) => (value === null ? null : Math.round(value.toNumber() * 100) / 100);
 
   return {
+    periodMonth: formatPeriod(periodMonth).slice(0, 7),
     people: people.map((person) => ({ id: person.id, name: person.name })),
     accounts: sortedAccounts,
     months,
@@ -123,4 +124,28 @@ export async function getEvolutionData(householdId: string, periodMonth: Date): 
       },
     },
   };
+}
+
+/**
+ * Dados da página de uma pessoa: os meses fechados (para o seletor de mês) e a
+ * evolução até o mês pedido — ou o último fechado, se o pedido não existir.
+ * `null` quando a pessoa não é desta família.
+ */
+export async function getPersonPageData(householdId: string, personId: string, requestedPeriod?: string) {
+  const [person, snapshots] = await Promise.all([
+    prisma.person.findFirst({ where: { id: personId, householdId }, select: { id: true, name: true } }),
+    prisma.monthlySnapshot.findMany({
+      where: { householdId, status: { in: closedStatuses } },
+      select: { periodMonth: true },
+      orderBy: { periodMonth: "asc" },
+    }),
+  ]);
+  if (!person) return null;
+
+  const periods = [...new Set(snapshots.map((snapshot) => formatPeriod(snapshot.periodMonth)))];
+  const requested = parseMonthOrNull(requestedPeriod);
+  const requestedKey = requested ? formatPeriod(requested) : null;
+  const periodMonth = requestedKey && periods.includes(requestedKey) ? requestedKey : (periods[periods.length - 1] ?? null);
+  const evolution = periodMonth ? await getEvolutionData(householdId, asMonthStart(periodMonth)) : null;
+  return { person, periods, periodMonth, evolution };
 }

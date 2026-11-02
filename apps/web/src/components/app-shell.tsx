@@ -27,11 +27,17 @@ async function isClosePending(householdId?: string) {
 export async function AppShell({ children }: { children: React.ReactNode }) {
   const session = await auth();
   if (!session?.user) redirect("/login");
-  const closePending = await isClosePending(session.user.householdId);
+  const householdId = session.user.householdId;
+  const [closePending, people] = await Promise.all([
+    isClosePending(householdId),
+    householdId
+      ? prisma.person.findMany({ where: { householdId }, orderBy: { name: "asc" }, select: { id: true, name: true } })
+      : Promise.resolve([]),
+  ]);
 
   return (
     <div className="min-h-screen bg-night text-body">
-      <aside className="fixed inset-y-0 left-0 z-20 hidden w-[264px] flex-col border-r border-edge-soft bg-sidebar px-4 pb-5 pt-6 lg:flex">
+      <aside className="fixed inset-y-0 left-0 z-20 hidden w-[264px] flex-col overflow-y-auto border-r border-edge-soft bg-sidebar px-4 pb-5 pt-6 lg:flex">
         <Link href="/dashboard" className="focus-ring flex items-center gap-3 rounded-lg px-2">
           <span className="grid h-[42px] w-[42px] shrink-0 place-items-center rounded-[10px] border border-gold/40 bg-gold/[0.08] p-[5px]">
             <Image src="/savastano-logo.png" alt="Savastano" width={96} height={126} className="h-full w-full object-contain" />
@@ -41,7 +47,7 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
             <span className="block text-[11px] uppercase tracking-[0.14em] text-faint">Financeiro familiar</span>
           </span>
         </Link>
-        <NavLinks closePending={closePending} />
+        <NavLinks closePending={closePending} people={people} />
         <div className="flex items-center gap-2.5 border-t border-edge-soft px-2 pt-4">
           <span className="grid h-[34px] w-[34px] shrink-0 place-items-center rounded-full border border-edge bg-elevated text-xs font-semibold text-gold">
             {initials(session.user.name)}
@@ -64,7 +70,7 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
             </Link>
             <SignOutButton compact />
           </div>
-          <MobileNavLinks />
+          <MobileNavLinks people={people} />
         </header>
         {children}
       </div>

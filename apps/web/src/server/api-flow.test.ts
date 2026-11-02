@@ -23,7 +23,7 @@ import { POST as createAccount } from "@/app/api/accounts/route";
 import { DELETE as deleteAccount, PUT as updateAccount } from "@/app/api/accounts/[id]/route";
 import { GET as listAuditLogs } from "@/app/api/audit-logs/route";
 import { GET as exportBackup } from "@/app/api/backup/export/route";
-import { getEvolutionData } from "@/server/evolution";
+import { getEvolutionData, getPersonPageData } from "@/server/evolution";
 import { getSnapshotHistory } from "@/server/metrics";
 import { debtRows, summaryRows } from "@/lib/evolution";
 
@@ -717,6 +717,14 @@ describe.skipIf(!runDbTests)("API route integration flows", () => {
     expect(summaryRows(evolution, bruno.id).map((row) => row.caixa)).toEqual([1000, 1400]);
     // Dívida de março: a declaração da própria base (800), a fatura sem somar a importada sem acento.
     expect(debtRows(evolution, "familia").at(-1)).toMatchObject({ month: "2037-03", outstanding: 800, invoice: 800, invoiceProjected: false });
+
+    // Página da pessoa: um mês que não fechou cai no último fechado; outro mês fechado limita a evolução a ele.
+    const personPage = await getPersonPageData(mockedAuth.householdId, bruno.id, "2037-02");
+    expect(personPage).toMatchObject({ person: { id: bruno.id }, periods: ["2037-01-01", "2037-03-01"], periodMonth: "2037-03-01" });
+    const januaryPage = await getPersonPageData(mockedAuth.householdId, bruno.id, "2037-01");
+    expect(januaryPage?.evolution?.months.map((row) => row.month)).toEqual(["2037-01"]);
+    // Pessoa de outra família não abre.
+    expect(await getPersonPageData("outra-familia", bruno.id)).toBeNull();
 
     const goals = await (await listGoals(new Request("http://test.local/api/goals?period_month=2037-03"))).json();
     const cfa = goals.find((goal: { id: string }) => goal.id === manualGoal.id);
