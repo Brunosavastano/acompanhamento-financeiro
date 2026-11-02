@@ -327,10 +327,21 @@ export function ReportsManager({
 
         <section className="rounded-[14px] border border-edge bg-surface p-6">
           <h2 className="font-display text-lg font-normal text-snow">Backup e exportação</h2>
-          <div className="mt-4 flex gap-2.5">
+          <a
+            href="/api/export/xlsx"
+            className="focus-ring mt-4 flex w-full items-center justify-center gap-2 rounded-[10px] bg-gold px-3 py-[11px] text-[13px] font-bold text-sidebar hover:bg-gold-light"
+          >
+            <FileSpreadsheet className="h-[15px] w-[15px]" aria-hidden />
+            Baixar planilha atualizada (.xlsx)
+          </a>
+          <p className="mt-2 text-[11px] leading-[17px] text-faint">
+            Para consultar no Excel: resumo mensal, contas mês a mês, dívidas do cartão, orçamento e metas, com os mesmos números do app. É só
+            para leitura — não serve para reimportar.
+          </p>
+          <div className="mt-4 flex flex-col gap-2.5 sm:flex-row">
             <a
               href="/api/backup/export"
-              className="focus-ring inline-flex flex-1 items-center justify-center gap-2 rounded-[10px] bg-gold px-3 py-[11px] text-[13px] font-bold text-sidebar hover:bg-gold-light"
+              className="focus-ring inline-flex flex-1 items-center justify-center gap-2 rounded-[10px] border border-edge bg-surface-2 px-3 py-[11px] text-[13px] font-semibold text-body hover:border-gold hover:text-snow"
             >
               <Download className="h-[15px] w-[15px]" aria-hidden />
               Backup completo (JSON)
