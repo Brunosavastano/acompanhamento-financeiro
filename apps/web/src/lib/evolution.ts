@@ -31,6 +31,8 @@ export type DebtPersonMonth = {
 };
 
 export type EvolutionData = {
+  /** Mês de referência ("AAAA-MM"): o último fechamento incluído. */
+  periodMonth: string;
   people: Array<{ id: string; name: string }>;
   accounts: EvolutionAccount[];
   months: EvolutionMonth[];
@@ -121,6 +123,78 @@ export function accountSeries(data: Pick<EvolutionData, "accounts" | "months">, 
       };
     })
     .filter((series) => series.points.some((point) => point.value !== 0));
+}
+
+/** Meses entre dois "AAAA-MM" (1 para meses seguidos). */
+export function monthGap(from: string, to: string): number {
+  const [fromYear, fromMonth] = from.split("-").map(Number);
+  const [toYear, toMonth] = to.split("-").map(Number);
+  return (toYear - fromYear) * 12 + (toMonth - fromMonth);
+}
+
+export type MonthlyChange = { month: string; value: number; months: number };
+
+/** Quanto o patrimônio mudou de um fechamento para o seguinte (um mês não fechado faz o intervalo valer 2 meses). */
+export function monthlyChanges(rows: SummaryRow[]): MonthlyChange[] {
+  return rows.slice(1).map((row, index) => ({
+    month: row.month,
+    value: round2(row.patrimonio - rows[index].patrimonio),
+    months: Math.max(1, monthGap(rows[index].month, row.month)),
+  }));
+}
+
+/** Média por mês das últimas `count` variações; um intervalo de 2 meses pesa 2, como no dashboard. */
+export function averageMonthlyChange(changes: MonthlyChange[], count = 12): { value: number; months: number } | null {
+  const recent = changes.slice(-count);
+  const months = recent.reduce((sum, row) => sum + row.months, 0);
+  return months > 0 ? { value: recent.reduce((sum, row) => sum + row.value, 0) / months, months } : null;
+}
+
+/** Contas, VR/VA e investimentos (com cashback) no último mês, como no painel "De onde vem o patrimônio". */
+export function latestComposition(data: Pick<EvolutionData, "accounts" | "months">, scope: Scope) {
+  const totals = { cash: 0, benefits: 0, investments: 0 };
+  const latest = data.months[data.months.length - 1];
+  if (latest) {
+    for (const account of data.accounts) {
+      if (!inScope(scope, account.personId)) continue;
+      const value = latest.balances[account.key] ?? 0;
+      if (account.category === "cash") totals.cash += value;
+      else if (account.category === "benefit") totals.benefits += value;
+      else totals.investments += value;
+    }
+  }
+  return { cash: round2(totals.cash), benefits: round2(totals.benefits), investments: round2(totals.investments) };
+}
+
+export type AccountTable = {
+  months: string[];
+  groups: Array<{ group: EvolutionAccount["group"]; accounts: Array<{ account: EvolutionAccount; values: number[] }>; totals: number[] }>;
+  debts: number[];
+  netWorth: number[];
+  /** Variação do patrimônio em relação ao fechamento anterior (null quando não há mês anterior). */
+  changes: Array<number | null>;
+};
+
+/** Saldo de cada conta nos últimos `count` meses (todos, sem `count`), com totais por grupo e o patrimônio. */
+export function accountTable(data: Pick<EvolutionData, "accounts" | "months">, scope: Scope, count?: number): AccountTable {
+  const start = count === undefined ? 0 : Math.max(0, data.months.length - count);
+  const summary = summaryRows(data, scope);
+  const visible = summary.slice(start);
+  const series = accountSeries({ accounts: data.accounts, months: data.months.slice(start) }, scope);
+  const groups = (["cash", "investments"] as const)
+    .map((group) => ({
+      group,
+      accounts: series.filter((item) => item.account.group === group).map((item) => ({ account: item.account, values: item.points.map((point) => point.value) })),
+      totals: visible.map((row) => (group === "cash" ? row.caixa : row.investimentos)),
+    }))
+    .filter((group) => group.accounts.length > 0);
+  return {
+    months: visible.map((row) => row.month),
+    groups,
+    debts: visible.map((row) => row.dividas),
+    netWorth: visible.map((row) => row.patrimonio),
+    changes: visible.map((row, index) => (start + index === 0 ? null : round2(row.patrimonio - summary[start + index - 1].patrimonio))),
+  };
 }
 
 export type DebtRow = {

@@ -1,7 +1,21 @@
 import { describe, expect, it } from "vitest";
-import { accountSeries, combinedLabel, combinedValue, debtRows, outlookRows, summaryRows, type EvolutionData } from "./evolution";
+import {
+  accountSeries,
+  accountTable,
+  averageMonthlyChange,
+  combinedLabel,
+  combinedValue,
+  debtRows,
+  latestComposition,
+  monthGap,
+  monthlyChanges,
+  outlookRows,
+  summaryRows,
+  type EvolutionData,
+} from "./evolution";
 
 const data: EvolutionData = {
+  periodMonth: "2026-11",
   people: [
     { id: "b", name: "Bruno" },
     { id: "t", name: "Tatiane" },
@@ -84,5 +98,38 @@ describe("evolution series", () => {
       { month: "2026-12", amount: 600, remainingAfter: 300 },
       { month: "2027-01", amount: 300, remainingAfter: 0 },
     ]);
+  });
+
+  it("measures each change over the months it spans and averages per month", () => {
+    expect(monthGap("2026-09", "2026-11")).toBe(2);
+    expect(monthGap("2025-12", "2026-01")).toBe(1);
+    // Bruno: 1200 + 5050 − 800 = 5450 em setembro; 1600 + 5500 − 700 = 6400 em novembro (outubro não fechou).
+    const changes = monthlyChanges(summaryRows(data, "b"));
+    expect(changes).toEqual([{ month: "2026-11", value: 950, months: 2 }]);
+    expect(averageMonthlyChange(changes)).toEqual({ value: 475, months: 2 });
+    expect(averageMonthlyChange([])).toBeNull();
+  });
+
+  it("splits the latest month into accounts, VR/VA and investments for one person", () => {
+    expect(latestComposition(data, "b")).toEqual({ cash: 1500, benefits: 100, investments: 5500 });
+    expect(latestComposition(data, "t")).toEqual({ cash: 400, benefits: 0, investments: 0 });
+  });
+
+  it("builds the month-by-month table with group totals, net worth and its change", () => {
+    const table = accountTable(data, "b");
+    expect(table.months).toEqual(["2026-09", "2026-11"]);
+    expect(table.groups.map((group) => [group.group, group.accounts.map((item) => item.account.name), group.totals])).toEqual([
+      ["cash", ["Nubank", "VR"], [1200, 1600]],
+      ["investments", ["XP", "Cashback"], [5050, 5500]],
+    ]);
+    expect(table.debts).toEqual([800, 700]);
+    expect(table.netWorth).toEqual([5450, 6400]);
+    expect(table.changes).toEqual([null, 950]);
+
+    // Só o último mês: a conta zerada some e a variação ainda compara com o mês anterior à janela.
+    const last = accountTable(data, "b", 1);
+    expect(last.months).toEqual(["2026-11"]);
+    expect(last.groups[1].accounts.map((item) => item.account.name)).toEqual(["XP"]);
+    expect(last.changes).toEqual([950]);
   });
 });

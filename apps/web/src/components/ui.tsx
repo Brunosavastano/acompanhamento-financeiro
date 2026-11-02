@@ -66,3 +66,32 @@ export function Select(props: React.SelectHTMLAttributes<HTMLSelectElement>) {
     />
   );
 }
+
+export function MiniKpi({
+  label,
+  value,
+  side,
+  sideTone,
+  sideCaption,
+}: {
+  label: string;
+  value: string;
+  side: string;
+  sideTone: "positive" | "muted" | "negative";
+  sideCaption: string;
+}) {
+  const tones = { positive: "text-positive-text", muted: "text-muted", negative: "text-negative-text" };
+  return (
+    <div className="flex items-center justify-between gap-4 rounded-[14px] border border-edge bg-surface px-5 py-4">
+      <div className="min-w-0">
+        <div className="text-xs font-semibold uppercase tracking-[0.14em] text-muted">{label}</div>
+        <div className="mt-1.5 truncate text-[22px] font-semibold tabular-nums text-snow">{value}</div>
+      </div>
+      <span className={clsx("shrink-0 text-right text-xs font-medium", tones[sideTone])}>
+        {side}
+        <br />
+        <span className="font-normal text-faint">{sideCaption}</span>
+      </span>
+    </div>
+  );
+}

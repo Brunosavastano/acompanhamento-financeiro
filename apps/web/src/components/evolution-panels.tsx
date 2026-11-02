@@ -1,8 +1,10 @@
 "use client";
 
-import { useMemo, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useId, useMemo, useRef, useState, type ReactNode, type Ref } from "react";
+import Link from "next/link";
 import { clsx } from "clsx";
-import { Bar, CartesianGrid, Cell, ComposedChart, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { ChevronLeft, ChevronRight, Maximize2, X } from "lucide-react";
+import { Bar, CartesianGrid, Cell, ComposedChart, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { currency } from "@/lib/format";
 import {
   COMBINABLE_KEYS,
@@ -10,11 +12,13 @@ import {
   SUMMARY_KEYS,
   SUMMARY_LABELS,
   accountSeries,
+  accountTable,
   combinedLabel,
   combinedValue,
   debtRows,
   outlookRows,
   summaryRows,
+  type AccountSeries,
   type EvolutionData,
   type Scope,
   type SummaryKey,
@@ -53,6 +57,14 @@ function windowed<T>(rows: T[], window: WindowKey) {
 function kTick(value: number) {
   if (value === 0) return "0";
   return `${new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 1 }).format(value / 1000)} mil`;
+}
+
+function signedBrl0(value: number) {
+  return `${value > 0 ? "+" : value < 0 ? "−" : ""}${brl0(Math.abs(value))}`;
+}
+
+function deltaTone(value: number | null) {
+  return value === null || value === 0 ? "text-faint" : value > 0 ? "text-positive-text" : "text-negative-text";
 }
 
 function ScopeToggle({ people, value, onChange, label }: { people: EvolutionData["people"]; value: Scope; onChange: (scope: Scope) => void; label: string }) {
@@ -103,18 +115,27 @@ function TooltipBox({ title, rows, note }: { title: string; rows: Array<{ label:
   );
 }
 
-/** Evolução do patrimônio por pessoa, com séries escolhidas e a evolução de cada conta. */
-export function EvolutionExplorer({ data }: { data: EvolutionData }) {
-  const [scope, setScope] = useState<Scope>(FAMILY_SCOPE);
+/**
+ * Evolução do patrimônio por pessoa, com séries escolhidas e a evolução de cada conta.
+ * Com `fixedScope` (página de uma pessoa) a chave Família/pessoa some.
+ */
+export function EvolutionExplorer({ data, fixedScope }: { data: EvolutionData; fixedScope?: Scope }) {
+  const [scope, setScope] = useState<Scope>(fixedScope ?? FAMILY_SCOPE);
   const [selected, setSelected] = useState<SummaryKey[]>([...SUMMARY_KEYS]);
   const [combine, setCombine] = useState(false);
   const [window, setWindow] = useState<WindowKey>("12");
+  const [expandedKey, setExpandedKey] = useState<string | null>(null);
 
   const rows = useMemo(() => windowed(summaryRows(data, scope), window), [data, scope, window]);
   const accounts = useMemo(() => {
     const windowedData = { accounts: data.accounts, months: windowed(data.months, window) };
     return accountSeries(windowedData, scope);
   }, [data, scope, window]);
+  // O gráfico ampliado tem a própria janela de meses, então recebe a história inteira de cada conta.
+  const expandable = useMemo(() => {
+    const full = new Map(accountSeries(data, scope).map((series) => [series.account.key, series]));
+    return accounts.map((series) => full.get(series.account.key) ?? series);
+  }, [data, scope, accounts]);
 
   const combinable = selected.filter((key) => COMBINABLE_KEYS.includes(key));
   const combining = combine && combinable.length >= 2;
@@ -147,7 +168,7 @@ export function EvolutionExplorer({ data }: { data: EvolutionData }) {
       </div>
 
       <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-3">
-        <ScopeToggle people={data.people} value={scope} onChange={setScope} label="Pessoa da evolução" />
+        {fixedScope ? null : <ScopeToggle people={data.people} value={scope} onChange={setScope} label="Pessoa da evolução" />}
         <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Séries do gráfico">
           {SUMMARY_KEYS.map((key) => {
             const active = selected.includes(key);
@@ -181,6 +202,14 @@ export function EvolutionExplorer({ data }: { data: EvolutionData }) {
           />
           Somar numa linha só
         </label>
+        {!fixedScope && scope !== FAMILY_SCOPE ? (
+          <Link
+            href={`/pessoas/${scope}?period_month=${data.periodMonth}`}
+            className="focus-ring ml-auto rounded text-xs font-semibold text-gold hover:text-gold-light"
+          >
+            Abrir a página de {peopleById.get(scope) ?? "?"} →
+          </Link>
+        ) : null}
       </div>
 
       {chartRows.length >= 2 && lines.length > 0 ? (
@@ -242,57 +271,448 @@ export function EvolutionExplorer({ data }: { data: EvolutionData }) {
         <div className="mt-6 border-t border-edge-soft pt-5">
           <div className="flex flex-wrap items-baseline justify-between gap-2">
             <h3 className="text-sm font-semibold text-snow">Cada conta</h3>
-            <span className="text-xs text-faint">variação em relação ao mês anterior</span>
+            <span className="text-xs text-faint">variação em relação ao mês anterior · clique para ampliar</span>
           </div>
           <div className="mt-3 grid grid-cols-2 gap-2.5 sm:gap-3 xl:grid-cols-4">
             {accounts.map((series) => {
               const delta = series.previous === null ? null : series.current - series.previous;
               return (
-                <div key={series.account.key} className="min-w-0 rounded-[10px] border border-edge-soft bg-surface-2 px-3 py-2.5 sm:px-3.5 sm:py-3">
-                  <div className="flex items-baseline justify-between gap-2">
+                <button
+                  key={series.account.key}
+                  type="button"
+                  aria-haspopup="dialog"
+                  onClick={() => setExpandedKey(series.account.key)}
+                  className="focus-ring group min-w-0 rounded-[10px] border border-edge-soft bg-surface-2 px-3 py-2.5 text-left hover:border-edge hover:bg-[#101A2E] sm:px-3.5 sm:py-3"
+                >
+                  <span className="flex items-center justify-between gap-2">
                     <span className="truncate text-[13px] font-medium text-body">
                       {scope === FAMILY_SCOPE ? `${peopleById.get(series.account.personId) ?? ""} · ` : ""}
                       {series.account.name}
                     </span>
-                    <span className="hidden shrink-0 text-[11px] text-faint sm:inline">{ACCOUNT_CATEGORY_LABELS[series.account.category]}</span>
-                  </div>
-                  <div className="mt-1 flex flex-wrap items-baseline justify-between gap-x-2">
+                    <span className="flex shrink-0 items-center gap-1.5 text-[11px] text-faint">
+                      <span className="hidden sm:inline">{ACCOUNT_CATEGORY_LABELS[series.account.category]}</span>
+                      <Maximize2 className="h-3 w-3 opacity-60 group-hover:text-snow group-hover:opacity-100" aria-hidden />
+                    </span>
+                  </span>
+                  <span className="mt-1 flex flex-wrap items-baseline justify-between gap-x-2">
                     <span className="text-[14px] font-semibold tabular-nums text-snow sm:text-[15px]">{brl0(series.current)}</span>
-                    {delta !== null ? (
-                      <span
-                        className={clsx(
-                          "text-[11px] font-semibold tabular-nums",
-                          delta > 0 ? "text-positive-text" : delta < 0 ? "text-negative-text" : "text-faint",
-                        )}
-                      >
-                        {delta > 0 ? "+" : delta < 0 ? "−" : ""}
-                        {brl0(Math.abs(delta))}
-                      </span>
-                    ) : null}
-                  </div>
+                    {delta !== null ? <span className={clsx("text-[11px] font-semibold tabular-nums", deltaTone(delta))}>{signedBrl0(delta)}</span> : null}
+                  </span>
                   {series.points.length >= 2 ? (
-                    <div className="mt-2 h-[40px]" aria-hidden>
+                    <span className="mt-2 block h-[40px]" aria-hidden>
                       <ResponsiveContainer width="100%" height="100%">
                         <LineChart data={series.points} margin={{ top: 4, right: 4, bottom: 4, left: 4 }}>
                           <YAxis hide domain={["dataMin", "dataMax"]} />
                           <Line type="linear" dataKey="value" stroke={SPARK_COLOR} strokeWidth={2} dot={false} isAnimationActive={false} />
                         </LineChart>
                       </ResponsiveContainer>
-                    </div>
+                    </span>
                   ) : null}
-                </div>
+                </button>
               );
             })}
           </div>
+          <AccountDialog
+            items={expandable}
+            activeKey={expandedKey}
+            onSelect={setExpandedKey}
+            onClose={() => setExpandedKey(null)}
+            initialWindow={window}
+            ownerName={(personId) => (scope === FAMILY_SCOPE ? (peopleById.get(personId) ?? null) : null)}
+          />
         </div>
       ) : null}
     </section>
   );
 }
 
+function IconButton({ label, onClick, children, ref }: { label: string; onClick: () => void; children: ReactNode; ref?: Ref<HTMLButtonElement> }) {
+  return (
+    <button
+      ref={ref}
+      type="button"
+      aria-label={label}
+      title={label}
+      onClick={onClick}
+      className="focus-ring grid h-8 w-8 place-items-center rounded-lg text-muted hover:bg-elevated hover:text-snow"
+    >
+      {children}
+    </button>
+  );
+}
+
+function DialogStat({ label, value, tone }: { label: string; value: string; tone?: string }) {
+  return (
+    <div className="min-w-0">
+      <div className="text-xs text-muted">{label}</div>
+      <div className={clsx("mt-1 text-[15px] font-semibold tabular-nums", tone ?? "text-snow")}>{value}</div>
+    </div>
+  );
+}
+
+/**
+ * Gráfico de uma conta ampliado no centro da tela (dialog nativo: Esc fecha,
+ * o foco fica preso na janela). Setas ← → passam para a conta vizinha.
+ */
+function AccountDialog({
+  items,
+  activeKey,
+  onSelect,
+  onClose,
+  initialWindow,
+  ownerName,
+}: {
+  items: AccountSeries[];
+  activeKey: string | null;
+  onSelect: (key: string) => void;
+  onClose: () => void;
+  initialWindow: WindowKey;
+  ownerName: (personId: string) => string | null;
+}) {
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  const closeRef = useRef<HTMLButtonElement>(null);
+  const pressedBackdrop = useRef(false);
+  const titleId = useId();
+  // O gráfico só monta com a janela já aberta (o ResponsiveContainer precisa medir o espaço).
+  const [open, setOpen] = useState(false);
+  const [window, setWindow] = useState<WindowKey>(initialWindow);
+
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+    if (activeKey !== null && !dialog.open) {
+      setWindow(initialWindow);
+      dialog.showModal();
+      closeRef.current?.focus();
+      setOpen(true);
+    } else if (activeKey === null && dialog.open) {
+      dialog.close();
+    }
+  }, [activeKey, initialWindow]);
+
+  const index = items.findIndex((item) => item.account.key === activeKey);
+  const series = index >= 0 ? items[index] : null;
+  const go = (step: number) => {
+    if (index < 0 || items.length < 2) return;
+    onSelect(items[(index + step + items.length) % items.length].account.key);
+  };
+
+  // Variação de cada mês calculada na história inteira: o primeiro mês da janela também tem a sua.
+  const allRows = (series?.points ?? []).map((point, i, points) => ({
+    ...point,
+    change: i === 0 ? null : Math.round((point.value - points[i - 1].value) * 100) / 100,
+  }));
+  const rows = windowed(allRows, window);
+  const first = rows[0];
+  const last = rows[rows.length - 1];
+  const previous = allRows.length > 1 ? allRows[allRows.length - 2] : null;
+  const highest = rows.reduce<(typeof rows)[number] | null>((best, row) => (best === null || row.value > best.value ? row : best), null);
+  const values = rows.map((row) => row.value);
+  const small = values.length > 0 && Math.max(...values.map(Math.abs)) < 1000;
+  const crossesZero = values.some((value) => value < 0) && values.some((value) => value > 0);
+  const owner = series ? ownerName(series.account.personId) : null;
+
+  return (
+    <dialog
+      ref={dialogRef}
+      aria-labelledby={titleId}
+      onClose={() => {
+        setOpen(false);
+        onClose();
+      }}
+      onMouseDown={(event) => {
+        pressedBackdrop.current = event.target === event.currentTarget;
+      }}
+      onClick={(event) => {
+        // Clique fora da janela (no fundo escurecido) fecha; arrastar de dentro para fora não.
+        if (pressedBackdrop.current && event.target === event.currentTarget) event.currentTarget.close();
+      }}
+      onKeyDown={(event) => {
+        if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+          event.preventDefault();
+          go(event.key === "ArrowLeft" ? -1 : 1);
+        }
+      }}
+      className="max-h-[calc(100dvh-24px)] w-[min(980px,calc(100vw-24px))] max-w-[calc(100vw-24px)] overflow-y-auto overscroll-contain rounded-[14px] border border-edge bg-surface p-0 text-body shadow-glow backdrop:bg-[#030610]/80"
+    >
+      {series && last ? (
+        <div className="p-5 sm:p-6">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-faint">
+                {owner ? `${owner} · ` : ""}
+                {ACCOUNT_CATEGORY_LABELS[series.account.category]}
+              </div>
+              <h2 id={titleId} className="mt-1 truncate font-display text-xl font-normal text-snow">
+                {series.account.name}
+              </h2>
+            </div>
+            <div className="flex shrink-0 items-center gap-0.5">
+              {items.length > 1 ? (
+                <>
+                  <IconButton label="Conta anterior" onClick={() => go(-1)}>
+                    <ChevronLeft className="h-4 w-4" aria-hidden />
+                  </IconButton>
+                  <span className="px-1 text-xs tabular-nums text-faint">
+                    {index + 1}/{items.length}
+                  </span>
+                  <IconButton label="Próxima conta" onClick={() => go(1)}>
+                    <ChevronRight className="h-4 w-4" aria-hidden />
+                  </IconButton>
+                </>
+              ) : null}
+              <IconButton ref={closeRef} label="Fechar" onClick={() => dialogRef.current?.close()}>
+                <X className="h-4 w-4" aria-hidden />
+              </IconButton>
+            </div>
+          </div>
+
+          <div className="mt-4 grid grid-cols-2 gap-x-6 gap-y-3 sm:flex sm:flex-wrap sm:items-end sm:gap-x-9">
+            <div className="col-span-2 min-w-0">
+              <div className="text-xs text-muted">
+                Saldo em {monthLong(last.month)} de {last.month.slice(0, 4)}
+              </div>
+              <div className="mt-1 text-[28px] font-semibold leading-none tabular-nums text-snow">{currency(last.value)}</div>
+            </div>
+            {previous ? (
+              <DialogStat
+                label={`Desde ${monthShort(previous.month)}`}
+                value={signedBrl0(last.value - previous.value)}
+                tone={deltaTone(last.value - previous.value)}
+              />
+            ) : null}
+            {first && first !== last ? (
+              <DialogStat label={`Desde ${monthShort(first.month)}`} value={signedBrl0(last.value - first.value)} tone={deltaTone(last.value - first.value)} />
+            ) : null}
+            {highest ? <DialogStat label={`Maior saldo (${monthShort(highest.month)})`} value={brl0(highest.value)} /> : null}
+          </div>
+
+          <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
+            <span className="text-xs text-faint">saldo no fechamento de cada mês</span>
+            <ChartWindowToggle value={window} onChange={setWindow} />
+          </div>
+
+          <div className="mt-3 grid gap-4 lg:grid-cols-[minmax(0,1fr)_290px]">
+            <div className="h-[260px] min-w-0 sm:h-[320px]" role="img" aria-label={`Saldo de ${series.account.name} por mês`}>
+              {open && rows.length >= 2 ? (
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={rows} margin={{ top: 8, right: 12, bottom: 0, left: 0 }}>
+                    <CartesianGrid stroke={GRID} strokeDasharray="4 6" vertical={false} />
+                    <XAxis
+                      dataKey="month"
+                      tick={TICK}
+                      tickLine={false}
+                      axisLine={{ stroke: GRID }}
+                      tickFormatter={monthShort}
+                      interval="equidistantPreserveStart"
+                      minTickGap={14}
+                    />
+                    <YAxis
+                      tick={TICK}
+                      tickLine={false}
+                      axisLine={false}
+                      width={64}
+                      domain={["auto", "auto"]}
+                      tickFormatter={(value: number) => (small ? brl0(value) : kTick(value))}
+                    />
+                    {crossesZero ? <ReferenceLine y={0} stroke="#3A4459" /> : null}
+                    <Tooltip
+                      cursor={{ stroke: "#3A4459", strokeWidth: 1 }}
+                      content={({ active, label }) => {
+                        if (!active) return null;
+                        const row = rows.find((item) => item.month === String(label));
+                        if (!row) return null;
+                        return (
+                          <TooltipBox
+                            title={monthShort(row.month)}
+                            rows={[
+                              { label: "Saldo", value: currency(row.value), color: SPARK_COLOR },
+                              ...(row.change !== null ? [{ label: "No mês", value: signedBrl0(row.change), color: "transparent" }] : []),
+                            ]}
+                          />
+                        );
+                      }}
+                    />
+                    <Line
+                      type="linear"
+                      dataKey="value"
+                      stroke={SPARK_COLOR}
+                      strokeWidth={2}
+                      dot={rows.length <= 12 ? { r: 3, fill: SPARK_COLOR, stroke: "#0E1526", strokeWidth: 1.5 } : false}
+                      activeDot={{ r: 5, fill: SPARK_COLOR, stroke: "#0E1526", strokeWidth: 2 }}
+                      isAnimationActive={false}
+                    />
+                  </LineChart>
+                </ResponsiveContainer>
+              ) : rows.length < 2 ? (
+                <p className="pt-6 text-sm text-muted">Só há um mês fechado nesta janela.</p>
+              ) : null}
+            </div>
+            <div className="rounded-[10px] border border-edge-soft lg:max-h-[320px] lg:overflow-y-auto">
+              <table className="w-full text-[13px]">
+                <caption className="sr-only">Saldo de {series.account.name} mês a mês</caption>
+                <thead className="sticky top-0 bg-surface-2 text-xs text-muted">
+                  <tr>
+                    <th scope="col" className="px-3 py-2 text-left font-semibold">
+                      Mês
+                    </th>
+                    <th scope="col" className="px-3 py-2 text-right font-semibold">
+                      Saldo
+                    </th>
+                    <th scope="col" className="px-3 py-2 text-right font-semibold">
+                      No mês
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {[...rows].reverse().map((row) => (
+                    <tr key={row.month} className="border-t border-edge-hair">
+                      <th scope="row" className="whitespace-nowrap px-3 py-1.5 text-left font-normal text-muted">
+                        {monthShort(row.month)}
+                      </th>
+                      <td className="whitespace-nowrap px-3 py-1.5 text-right tabular-nums text-snow">{currency(row.value)}</td>
+                      <td className={clsx("whitespace-nowrap px-3 py-1.5 text-right tabular-nums", deltaTone(row.change))}>
+                        {row.change === null ? "—" : signedBrl0(row.change)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </dialog>
+  );
+}
+
+const GROUP_LABELS = { cash: "Caixa", investments: "Investimentos" } as const;
+const GROUP_TOTAL_LABELS = { cash: "Total em caixa", investments: "Total investido" } as const;
+
+/** Saldo de cada conta em cada fechamento, como uma planilha: contas nas linhas, meses nas colunas. */
+export function AccountsTable({ data, scope }: { data: EvolutionData; scope: Scope }) {
+  const [window, setWindow] = useState<WindowKey>("6");
+  const table = useMemo(() => accountTable(data, scope, window === "all" ? undefined : Number(window)), [data, scope, window]);
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  // Com mais meses do que cabem, começa mostrando os mais recentes (à direita).
+  useEffect(() => {
+    const element = scrollRef.current;
+    if (element) element.scrollLeft = element.scrollWidth;
+  }, [table]);
+
+  if (table.months.length === 0) return null;
+  const cell = "whitespace-nowrap px-3 py-2 text-right tabular-nums";
+  // Primeira coluna fixa ao rolar para os lados, com uma linha separando o que passa por baixo.
+  const rowHeader = "sticky left-0 z-[1] whitespace-nowrap bg-surface py-2 pr-4 text-left shadow-[inset_-1px_0_0_#182238]";
+  const money = (value: number) => (value === 0 ? "—" : brl0(value));
+
+  return (
+    <section className="min-w-0 rounded-[14px] border border-edge bg-surface p-6">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 className="font-display text-lg font-normal text-snow">Mês a mês</h2>
+          <p className="mt-0.5 text-xs text-faint">saldo de cada conta no fechamento de cada mês</p>
+        </div>
+        <ChartWindowToggle value={window} onChange={setWindow} />
+      </div>
+      <div ref={scrollRef} className="mt-4 overflow-x-auto">
+        <table className="w-full border-separate border-spacing-0 text-[13px]">
+          <thead>
+            <tr className="text-xs text-muted">
+              <th scope="col" className={clsx(rowHeader, "font-semibold")}>
+                Conta
+              </th>
+              {table.months.map((month) => (
+                <th key={month} scope="col" className={clsx(cell, "font-semibold")}>
+                  {monthShort(month)}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {table.groups.map((group) => (
+              <Fragment key={group.group}>
+                <tr>
+                  <th
+                    scope="colgroup"
+                    className={clsx(rowHeader, "border-t border-edge-soft pb-1 pt-4 text-[11px] font-semibold uppercase tracking-[0.14em] text-faint")}
+                  >
+                    {GROUP_LABELS[group.group]}
+                  </th>
+                  <td colSpan={table.months.length} className="border-t border-edge-soft" />
+                </tr>
+                {group.accounts.map(({ account, values }) => (
+                  <tr key={account.key} className="text-body">
+                    <th scope="row" className={clsx(rowHeader, "font-normal")}>
+                      {account.name}
+                      {(account.category === "benefit" || account.category === "cashback") && account.name !== ACCOUNT_CATEGORY_LABELS[account.category] ? (
+                        <span className="ml-1.5 text-[11px] text-faint">{ACCOUNT_CATEGORY_LABELS[account.category]}</span>
+                      ) : null}
+                    </th>
+                    {values.map((value, index) => (
+                      <td key={table.months[index]} className={clsx(cell, value < 0 && "text-negative-text")}>
+                        {money(value)}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+                {/* Com uma conta só, o total repetiria a mesma linha. */}
+                {group.accounts.length > 1 ? (
+                  <tr className="font-semibold text-snow">
+                    <th scope="row" className={clsx(rowHeader, "border-t border-edge-hair font-semibold")}>
+                      {GROUP_TOTAL_LABELS[group.group]}
+                    </th>
+                    {group.totals.map((value, index) => (
+                      <td key={table.months[index]} className={clsx(cell, "border-t border-edge-hair")}>
+                        {money(value)}
+                      </td>
+                    ))}
+                  </tr>
+                ) : null}
+              </Fragment>
+            ))}
+            <tr className="text-body">
+              <th scope="row" className={clsx(rowHeader, "border-t border-edge-soft pt-4 font-normal")}>
+                Dívidas do cartão
+                <span className="block text-[11px] text-faint">a valor presente</span>
+              </th>
+              {table.debts.map((value, index) => (
+                <td key={table.months[index]} className={clsx(cell, "border-t border-edge-soft pt-4", value > 0 && "text-negative-text")}>
+                  {value === 0 ? "—" : `−${brl0(value)}`}
+                </td>
+              ))}
+            </tr>
+            <tr className="font-semibold text-snow">
+              <th scope="row" className={clsx(rowHeader, "font-semibold")}>
+                Patrimônio líquido
+              </th>
+              {table.netWorth.map((value, index) => (
+                <td key={table.months[index]} className={cell}>
+                  {brl0(value)}
+                </td>
+              ))}
+            </tr>
+            <tr>
+              <th scope="row" className={clsx(rowHeader, "font-normal text-muted")}>
+                Variação no mês
+              </th>
+              {table.changes.map((value, index) => (
+                <td key={table.months[index]} className={clsx(cell, "font-semibold", deltaTone(value))}>
+                  {value === null ? "—" : signedBrl0(value)}
+                </td>
+              ))}
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
 /** Dívidas ao longo do tempo: total a pagar, fatura de cada mês e o que ainda vai vencer. */
-export function DebtEvolutionPanel({ data }: { data: EvolutionData }) {
-  const [scope, setScope] = useState<Scope>(FAMILY_SCOPE);
+export function DebtEvolutionPanel({ data, fixedScope }: { data: EvolutionData; fixedScope?: Scope }) {
+  const [scope, setScope] = useState<Scope>(fixedScope ?? FAMILY_SCOPE);
   const [tab, setTab] = useState<"historico" | "proximos">("historico");
   const [window, setWindow] = useState<WindowKey>("12");
 
@@ -340,10 +760,16 @@ export function DebtEvolutionPanel({ data }: { data: EvolutionData }) {
         </div>
       </div>
 
-      <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
-        <ScopeToggle people={data.people} value={scope} onChange={setScope} label="Pessoa das dívidas" />
-        {tab === "historico" ? <ChartWindowToggle value={window} onChange={setWindow} /> : null}
-      </div>
+      {!fixedScope || tab === "historico" ? (
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+          {fixedScope ? null : <ScopeToggle people={data.people} value={scope} onChange={setScope} label="Pessoa das dívidas" />}
+          {tab === "historico" ? (
+            <div className="ml-auto">
+              <ChartWindowToggle value={window} onChange={setWindow} />
+            </div>
+          ) : null}
+        </div>
+      ) : null}
 
       {tab === "historico" ? (
         rows.length > 0 ? (

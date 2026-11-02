@@ -262,7 +262,7 @@ export function CompositionPanel({ scopes }: { scopes: CompositionScopeView[] })
     <section className="min-w-0 rounded-[14px] border border-edge bg-surface p-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h2 className="font-display text-lg font-normal text-snow">De onde vem o patrimônio</h2>
-        <div className="inline-flex rounded-lg border border-edge bg-surface-2 p-[3px]">
+        <div className={clsx("inline-flex rounded-lg border border-edge bg-surface-2 p-[3px]", scopes.length < 2 && "hidden")}>
           {scopes.map((option) => (
             <button
               key={option.id}

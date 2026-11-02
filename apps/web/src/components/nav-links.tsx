@@ -12,13 +12,15 @@ import {
   Flag,
   History,
   Settings,
+  UserRound,
   type LucideIcon,
 } from "lucide-react";
 
 type NavItem = { href: string; label: string; icon: LucideIcon; pendingDot?: boolean };
 type NavGroup = { label: string; items: NavItem[] };
+export type NavPerson = { id: string; name: string };
 
-function navGroups(closePending: boolean): NavGroup[] {
+function navGroups(closePending: boolean, people: NavPerson[]): NavGroup[] {
   return [
     {
       label: "Visão",
@@ -27,6 +29,14 @@ function navGroups(closePending: boolean): NavGroup[] {
         { href: "/fechamento", label: "Fechar o mês", icon: CalendarCheck, pendingDot: closePending },
       ],
     },
+    ...(people.length > 0
+      ? [
+          {
+            label: "Pessoas",
+            items: people.map((person) => ({ href: `/pessoas/${person.id}`, label: person.name.split(" ")[0], icon: UserRound })),
+          },
+        ]
+      : []),
     {
       label: "Patrimônio",
       items: [
@@ -51,12 +61,12 @@ function navGroups(closePending: boolean): NavGroup[] {
   ];
 }
 
-export function NavLinks({ closePending = false }: { closePending?: boolean }) {
+export function NavLinks({ closePending = false, people = [] }: { closePending?: boolean; people?: NavPerson[] }) {
   const pathname = usePathname();
 
   return (
     <nav className="mt-7 flex flex-1 flex-col gap-5">
-      {navGroups(closePending).map((group) => (
+      {navGroups(closePending, people).map((group) => (
         <div key={group.label} className="flex flex-col gap-0.5">
           <span className="px-3 pb-1.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-faint">
             {group.label}
@@ -96,9 +106,9 @@ export function NavLinks({ closePending = false }: { closePending?: boolean }) {
   );
 }
 
-export function MobileNavLinks() {
+export function MobileNavLinks({ people = [] }: { people?: NavPerson[] }) {
   const pathname = usePathname();
-  const items = navGroups(false).flatMap((group) => group.items);
+  const items = navGroups(false, people).flatMap((group) => group.items);
 
   return (
     <nav className="mt-3 flex gap-2 overflow-x-auto pb-1">

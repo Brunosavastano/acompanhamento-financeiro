@@ -44,9 +44,16 @@ test.describe.serial("private finance app", () => {
     // Evolução por pessoa (com a evolução de cada conta) e dívidas ao longo do tempo.
     const explorer = page.locator("section", { has: page.getByRole("heading", { name: "Evolução", exact: true }) });
     await expect(explorer.getByRole("group", { name: "Séries do gráfico" })).toBeVisible();
-    await explorer.getByRole("button", { name: "Tatiane" }).click();
-    await expect(explorer.getByRole("button", { name: "Tatiane" })).toHaveAttribute("aria-pressed", "true");
+    await explorer.getByRole("button", { name: "Tatiane", exact: true }).click();
+    await expect(explorer.getByRole("button", { name: "Tatiane", exact: true })).toHaveAttribute("aria-pressed", "true");
     await expect(explorer.getByRole("heading", { name: "Cada conta" })).toBeVisible();
+    // Cada minigráfico abre ampliado no centro da tela; Esc fecha.
+    await explorer.locator('button[aria-haspopup="dialog"]').first().click();
+    const accountDialog = page.getByRole("dialog");
+    await expect(accountDialog).toBeVisible();
+    await expect(accountDialog.getByRole("columnheader", { name: "Saldo" })).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(accountDialog).toBeHidden();
     const debts = page.locator("section", { has: page.getByRole("heading", { name: "Dívidas do cartão" }) });
     await expect(debts.getByText(/Desde abril, venceram/)).toBeVisible();
     await debts.getByRole("tab", { name: "Próximos meses" }).click();
@@ -60,6 +67,19 @@ test.describe.serial("private finance app", () => {
     expect(backup.snapshots.length).toBeGreaterThanOrEqual(14);
     expect(backup.goals).toHaveLength(20);
     expect(backup.goals.some((goal: { title: string }) => goal.title === "TOTAL GERAL:" || goal.title === "MARCO")).toBe(false);
+  });
+
+  test("opens each person's page from the menu", async ({ page }) => {
+    test.skip(!fs.existsSync(workbookPath), `Workbook not found: ${workbookPath}`);
+
+    await login(page);
+    await page.getByRole("link", { name: "Tatiane", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "Tatiane", level: 1 })).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByText("Patrimônio líquido de Tatiane")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Mês a mês" })).toBeVisible();
+    await expect(page.getByRole("rowheader", { name: "Patrimônio líquido" })).toBeVisible();
+    // Sem a chave Família/pessoa: a página já é de uma pessoa só.
+    await expect(page.getByRole("group", { name: "Pessoa da evolução" })).toHaveCount(0);
   });
 
   test("creates and closes a monthly snapshot through the wizard", async ({ page }) => {
