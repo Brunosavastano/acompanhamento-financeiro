@@ -5,7 +5,9 @@ import {
   averageMonthlyChange,
   combinedLabel,
   combinedValue,
+  debtBridge,
   debtRows,
+  invoiceComparison,
   latestComposition,
   monthGap,
   monthlyChanges,
@@ -90,6 +92,18 @@ describe("evolution series", () => {
     expect(family[0]).toMatchObject({ outstanding: 2300, invoice: 1200, missing: [] });
     expect(family[1]).toMatchObject({ outstanding: 1700, newSincePrevious: 1300, missing: ["t"] });
     expect(debtRows(data, "t")[1]).toMatchObject({ outstanding: null, missing: ["t"] });
+  });
+
+  it("bridges two closes only when everyone declared in both, and compares the invoice with its average", () => {
+    const bruno = debtRows(data, "b");
+    expect(debtBridge(bruno[1], bruno[0])).toEqual({ previousMonth: "2026-09", paid: 1600, added: 1300, from: 2000, to: 1700 });
+    // Tatiane não declarou em novembro: a ponte da família ficaria incompleta.
+    const family = debtRows(data, "familia");
+    expect(debtBridge(family[1], family[0])).toBeNull();
+    expect(debtBridge(bruno[0], null)).toBeNull();
+
+    expect(invoiceComparison(bruno[1])).toEqual({ month: "2026-11", invoice: 900, average: 950, ratio: 900 / 950 - 1, projected: false });
+    expect(invoiceComparison(debtRows(data, "t")[1])).toBeNull();
   });
 
   it("builds the upcoming schedule with what is left after each month", () => {

@@ -9,13 +9,16 @@ import { currency } from "@/lib/format";
 import {
   COMBINABLE_KEYS,
   FAMILY_SCOPE,
+  INVOICE_ON_AVERAGE_TOLERANCE,
   SUMMARY_KEYS,
   SUMMARY_LABELS,
   accountSeries,
   accountTable,
   combinedLabel,
   combinedValue,
+  debtBridge,
   debtRows,
+  invoiceComparison,
   outlookRows,
   summaryRows,
   type AccountSeries,
@@ -23,7 +26,9 @@ import {
   type Scope,
   type SummaryKey,
 } from "@/lib/evolution";
+import { explain } from "@/lib/explanations";
 import { ChartWindowToggle, GRID, TICK, brl0, monthShort, tooltipContentStyle, type WindowKey } from "@/components/dashboard-panels";
+import { InfoTip } from "@/components/info-tip";
 
 // Paleta validada (dataviz) contra o fundo escuro do app: cor fixa por série,
 // nunca pela posição — esconder uma série não repinta as outras.
@@ -161,7 +166,10 @@ export function EvolutionExplorer({ data, fixedScope }: { data: EvolutionData; f
     <section className="min-w-0 rounded-[14px] border border-edge bg-surface p-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="font-display text-lg font-normal text-snow">Evolução</h2>
+          <div className="flex items-center gap-1.5">
+            <h2 className="font-display text-lg font-normal text-snow">Evolução</h2>
+            <InfoTip explanation={explain("evolucao")} />
+          </div>
           <p className="mt-0.5 text-xs text-faint">saldos de cada mês fechado; dívidas a valor presente, como entram no patrimônio</p>
         </div>
         <ChartWindowToggle value={window} onChange={setWindow} />
@@ -611,7 +619,10 @@ export function AccountsTable({ data, scope }: { data: EvolutionData; scope: Sco
     <section className="min-w-0 rounded-[14px] border border-edge bg-surface p-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="font-display text-lg font-normal text-snow">Mês a mês</h2>
+          <div className="flex items-center gap-1.5">
+            <h2 className="font-display text-lg font-normal text-snow">Mês a mês</h2>
+            <InfoTip explanation={explain("mesAMes")} />
+          </div>
           <p className="mt-0.5 text-xs text-faint">saldo de cada conta no fechamento de cada mês</p>
         </div>
         <ChartWindowToggle value={window} onChange={setWindow} />
@@ -733,7 +744,10 @@ export function DebtEvolutionPanel({ data, fixedScope }: { data: EvolutionData; 
     <section className="min-w-0 rounded-[14px] border border-edge bg-surface p-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="font-display text-lg font-normal text-snow">Dívidas do cartão</h2>
+          <div className="flex items-center gap-1.5">
+            <h2 className="font-display text-lg font-normal text-snow">Dívidas do cartão</h2>
+            <InfoTip explanation={explain("dividasPainel")} />
+          </div>
           <p className="mt-0.5 text-xs text-faint">soma das parcelas declaradas em cada fechamento</p>
         </div>
         <div className="inline-flex rounded-lg border border-edge bg-surface-2 p-[3px]" role="tablist" aria-label="Visão das dívidas">
@@ -945,20 +959,16 @@ function DebtSummary({
 }) {
   if (!current) return null;
   const sentences: ReactNode[] = [];
+  // Mesma regra das frases do topo da página ("O que mudou"): lib/evolution.
+  const bridge = debtBridge(current, previous);
+  const comparison = invoiceComparison(current);
   if (current.missing.length > 0) {
     sentences.push(`Sem declaração de ${names(current.missing)} em ${monthLong(current.month)}, então o total do mês está incompleto.`);
-  } else if (
-    previous &&
-    previous.missing.length === 0 &&
-    previous.outstanding !== null &&
-    current.outstanding !== null &&
-    current.paidSincePrevious !== null &&
-    current.newSincePrevious !== null
-  ) {
-    const added = current.newSincePrevious;
+  } else if (bridge) {
+    const added = bridge.added;
     sentences.push(
       <>
-        Desde {monthLong(previous.month)}, venceram <strong className="font-semibold text-snow">{currency(current.paidSincePrevious)}</strong> em
+        Desde {monthLong(bridge.previousMonth)}, venceram <strong className="font-semibold text-snow">{currency(bridge.paid)}</strong> em
         faturas e{" "}
         {added >= 0 ? (
           <>
@@ -969,17 +979,17 @@ function DebtSummary({
             as parcelas futuras diminuíram <strong className="font-semibold text-snow">{currency(Math.abs(added))}</strong> (estornos ou ajustes)
           </>
         )}
-        . O total a pagar foi de {currency(previous.outstanding)} para{" "}
-        <strong className="font-semibold text-snow">{currency(current.outstanding)}</strong>.
+        . O total a pagar foi de {currency(bridge.from)} para{" "}
+        <strong className="font-semibold text-snow">{currency(bridge.to)}</strong>.
       </>,
     );
   }
-  if (current.invoice !== null && current.averageInvoice !== null && current.averageInvoice > 0) {
-    const ratio = current.invoice / current.averageInvoice - 1;
+  if (comparison) {
+    const { ratio } = comparison;
     sentences.push(
-      Math.abs(ratio) < 0.05
-        ? `A fatura de ${monthLong(current.month)} (${currency(current.invoice)}) está na média dos últimos 12 meses.`
-        : `A fatura de ${monthLong(current.month)} (${currency(current.invoice)}) está ${Math.round(Math.abs(ratio) * 100)}% ${ratio > 0 ? "acima" : "abaixo"} da média dos últimos 12 meses (${currency(current.averageInvoice)}).`,
+      Math.abs(ratio) < INVOICE_ON_AVERAGE_TOLERANCE
+        ? `A fatura de ${monthLong(comparison.month)} (${currency(comparison.invoice)}) está na média dos últimos 12 meses.`
+        : `A fatura de ${monthLong(comparison.month)} (${currency(comparison.invoice)}) está ${Math.round(Math.abs(ratio) * 100)}% ${ratio > 0 ? "acima" : "abaixo"} da média dos últimos 12 meses (${currency(comparison.average)}).`,
     );
   }
   if (sentences.length === 0) return null;

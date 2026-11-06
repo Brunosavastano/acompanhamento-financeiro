@@ -16,6 +16,8 @@ import {
   YAxis,
 } from "recharts";
 import { currency } from "@/lib/format";
+import { explain } from "@/lib/explanations";
+import { InfoTip } from "@/components/info-tip";
 
 type Point = { month: string; value: number };
 
@@ -168,8 +170,11 @@ export function VariationPanel({ data, average }: { data: Array<Point & { months
   };
   return (
     <section className="min-w-0 rounded-[14px] border border-edge bg-surface p-6">
-      <div className="flex flex-wrap items-baseline justify-between gap-4">
-        <h2 className="font-display text-lg font-normal text-snow">Variação mensal</h2>
+      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
+        <div className="flex items-center gap-1.5">
+          <h2 className="font-display text-lg font-normal text-snow">Variação mensal</h2>
+          <InfoTip explanation={explain("variacaoMensal")} />
+        </div>
         <span className="text-xs text-faint">quanto o patrimônio mudou em cada mês</span>
       </div>
       <div className="mt-4 h-[220px]">
@@ -261,7 +266,10 @@ export function CompositionPanel({ scopes }: { scopes: CompositionScopeView[] })
   return (
     <section className="min-w-0 rounded-[14px] border border-edge bg-surface p-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h2 className="font-display text-lg font-normal text-snow">De onde vem o patrimônio</h2>
+        <div className="flex items-center gap-1.5">
+          <h2 className="font-display text-lg font-normal text-snow">De onde vem o patrimônio</h2>
+          <InfoTip explanation={explain("composicao")} />
+        </div>
         <div className={clsx("inline-flex rounded-lg border border-edge bg-surface-2 p-[3px]", scopes.length < 2 && "hidden")}>
           {scopes.map((option) => (
             <button

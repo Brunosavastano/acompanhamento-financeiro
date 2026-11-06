@@ -4,10 +4,14 @@ import { ArrowDownRight, ArrowUpRight, TrendingUp } from "lucide-react";
 import { getRequiredPageHouseholdId } from "@/lib/authz";
 import { currency, percent } from "@/lib/format";
 import { asMonthStart } from "@/lib/date";
-import { FAMILY_SCOPE, averageMonthlyChange, latestComposition, monthGap, monthlyChanges, summaryRows } from "@/lib/evolution";
+import { FAMILY_SCOPE, averageMonthlyChange, debtRows, latestComposition, monthGap, monthlyChanges, summaryRows } from "@/lib/evolution";
+import { explain, nominalDebtNote } from "@/lib/explanations";
+import { buildMonthInsights } from "@/lib/insights";
 import { getPersonPageData } from "@/server/evolution";
 import { CompositionPanel, HeroSparkline, VariationPanel } from "@/components/dashboard-panels";
 import { AccountsTable, DebtEvolutionPanel, EvolutionExplorer } from "@/components/evolution-panels";
+import { InfoTip } from "@/components/info-tip";
+import { MonthInsightsPanel } from "@/components/month-insights";
 import { EmptyState, MiniKpi, PageBody } from "@/components/ui";
 import { PageHeader } from "@/components/page-header";
 import { MonthPager } from "@/components/month-pager";
@@ -79,6 +83,9 @@ export default async function PersonPage({
   const decimalsAt = netWorthText.lastIndexOf(",");
   const variation = previous ? current.patrimonio - previous.patrimonio : null;
   const composition = latestComposition(evolution, person.id);
+  // Mesma variação do selo do topo: o texto nunca diverge do card.
+  const insights = buildMonthInsights({ evolution, scope: person.id, netWorth: { value: current.patrimonio, change: variation } });
+  const personDebts = debtRows(evolution, person.id);
 
   return (
     <>
@@ -87,11 +94,19 @@ export default async function PersonPage({
         actions={<MonthPager current={periodMonth} periods={periods} basePath={`/pessoas/${person.id}`} />}
       />
       <PageBody>
-        <div className="grid gap-4 lg:grid-cols-[1.5fr_1fr]">
+        <MonthInsightsPanel insights={insights} family={false} />
+
+        <div className="mt-4 grid gap-4 lg:grid-cols-[1.5fr_1fr]">
           <section className="relative min-w-0 overflow-hidden rounded-[14px] border border-edge bg-[linear-gradient(160deg,#101A30_0%,#0E1526_55%)] p-7">
             <div className="flex items-start justify-between gap-4">
               <div className="min-w-0">
-                <div className="text-xs font-semibold uppercase tracking-[0.16em] text-muted">Patrimônio líquido de {firstName}</div>
+                <div className="text-xs font-semibold uppercase tracking-[0.16em] text-muted">
+                  Patrimônio líquido de{" "}
+                  <span className="whitespace-nowrap">
+                    {firstName}
+                    <InfoTip explanation={explain("patrimonio")} className="-my-1 ml-1" />
+                  </span>
+                </div>
                 <div className="mt-2.5 whitespace-nowrap text-[clamp(30px,3vw,44px)] font-semibold tracking-[-0.02em] tabular-nums text-snow">
                   {decimalsAt >= 0 ? (
                     <>
@@ -160,6 +175,11 @@ export default async function PersonPage({
                   side={change === null ? "—" : signedBrl0(change)}
                   sideTone={good === null ? "muted" : good ? "positive" : "negative"}
                   sideCaption={sinceCaption}
+                  info={
+                    <InfoTip
+                      explanation={explain(key, key === "dividas" ? [nominalDebtNote(personDebts[personDebts.length - 1]?.outstanding)] : [])}
+                    />
+                  }
                 />
               );
             })}
