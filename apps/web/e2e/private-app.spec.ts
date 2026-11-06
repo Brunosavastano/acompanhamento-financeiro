@@ -4,6 +4,7 @@ import { expect, test, type Page } from "@playwright/test";
 import bcrypt from "bcryptjs";
 import { PrismaClient } from "@prisma/client";
 import * as XLSX from "xlsx";
+import { startMockVisionProvider } from "./mock-vision-provider";
 
 loadDotEnv();
 
@@ -107,7 +108,7 @@ test.describe.serial("private finance app", () => {
 
     // Passo 2 — posição avulsa: adiciona e remove.
     await page.getByRole("button", { name: "Adicionar posição avulsa" }).click();
-    await page.getByRole("combobox").selectOption({ label: "Bruno — Cashback" });
+    await page.getByRole("combobox", { name: "Conta da posição avulsa" }).selectOption({ label: "Bruno — Cashback" });
     await page.getByPlaceholder("Valor").fill("123.45");
     await page.getByRole("button", { name: "Adicionar", exact: true }).click();
     await expect(page.getByText("Posição adicionada ao rascunho.")).toBeVisible({ timeout: 30_000 });
@@ -200,6 +201,103 @@ test.describe.serial("private finance app", () => {
     await timeline.getByRole("button", { name: "Salvar lançamento", exact: true }).click();
     await expect(page.getByText("Lançamento atualizado.")).toBeVisible();
     await expect(page.getByText("R$ 1.300,00").first()).toBeVisible();
+  });
+
+  // Requer o app iniciado com a IA apontando para o provedor simulado deste teste:
+  // AI_FEATURES_ENABLED=true, AI_PROVIDER=openai, AI_VISION_MODEL=<qualquer>,
+  // OPENAI_API_KEY=<qualquer>, OPENAI_BASE_URL=http://127.0.0.1:<E2E_AI_MOCK_PORT>/v1.
+  test("fills balances from bank prints with a simulated vision provider, saving only on the human click", async ({ page }) => {
+    const mockPort = Number(process.env.E2E_AI_MOCK_PORT);
+    test.skip(!mockPort, "Defina E2E_AI_MOCK_PORT e suba o app com OPENAI_BASE_URL apontando para o provedor simulado.");
+
+    const provider = await startMockVisionProvider(mockPort, {
+      reads: [
+        { imageIndex: 1, institution: "Nubank", accountLabel: "Conta", holderName: "Olá, Bruno", kind: "cash", amountRaw: "R$ 12.345,67", excerpt: "Saldo em conta R$ 12.345,67", confidence: 0.97, note: null },
+        { imageIndex: 2, institution: "Alelo", accountLabel: "Refeição", holderName: null, kind: "benefit", amountRaw: "R$ 512,30", excerpt: "Refeição R$ 512,30", confidence: 0.93, note: null },
+        { imageIndex: 2, institution: "XP", accountLabel: "Patrimônio total", holderName: null, kind: "investment", amountRaw: "R$ 45.000,00", excerpt: "Patrimônio total R$ 45.000,00", confidence: 0.9, note: null },
+        { imageIndex: 2, institution: "Itaú", accountLabel: "Saldo", holderName: null, kind: "other", amountRaw: "R$ ••••", excerpt: "Saldo R$ ••••", confidence: 0.4, note: "valor oculto" },
+      ],
+      warnings: [],
+    });
+    try {
+      await login(page);
+      await page.goto("/fechamento");
+      await page.getByLabel("Mês de referência").fill("2098-07");
+      await page.getByRole("button", { name: "Começar rascunho" }).click();
+      await expect(page.getByText("Rascunho criado. Informe os saldos por conta.")).toBeVisible({ timeout: 30_000 });
+
+      // Dois prints (PNG mínimo válido); a leitura devolve 4 saldos para revisão.
+      const tinyPng = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==", "base64");
+      await page.getByLabel("Prints dos apps dos bancos").setInputFiles([
+        { name: "nubank.png", mimeType: "image/png", buffer: tinyPng },
+        { name: "beneficios.png", mimeType: "image/png", buffer: tinyPng },
+      ]);
+      await expect(page.getByText("4 saldos lidos, 2 com conta sugerida.", { exact: false })).toBeVisible({ timeout: 30_000 });
+      expect(provider.calls).toHaveLength(1);
+      expect(provider.calls[0].imageCount).toBe(2);
+      expect(provider.calls[0].texts).toEqual(expect.arrayContaining(["Print 1:", "Print 2:"]));
+
+      // A leitura não grava nada: o rascunho continua zerado no banco.
+      const draftAmounts = async () =>
+        page.evaluate(async () => {
+          const snapshots = (await (await fetch("/api/monthly-snapshots")).json()) as Array<{
+            periodMonth: string;
+            positions: Array<{ amount: string; source: string; person: { name: string }; account: { name: string } | null }>;
+          }>;
+          const draft = snapshots.find((snapshot) => snapshot.periodMonth.startsWith("2098-07"));
+          return (draft?.positions ?? []).map((position) => ({
+            label: `${position.person.name} — ${position.account?.name}`,
+            amount: Number(position.amount),
+            source: position.source,
+          }));
+        });
+      expect((await draftAmounts()).every((position) => position.amount === 0 && position.source === "manual")).toBe(true);
+
+      // Salvar com leituras ainda fora dos campos pede confirmação; cancelando, nada é gravado.
+      const pendingWarning = new Promise<string>((resolve) => {
+        page.once("dialog", (dialog) => {
+          resolve(dialog.message());
+          void dialog.dismiss();
+        });
+      });
+      await page.getByRole("button", { name: "Salvar e revisar" }).click();
+      expect(await pendingWarning).toMatch(/2 saldos lidos dos prints ainda não foram para os campos/);
+      await expect(page.getByText(/Saldos não salvos\. Clique em "Preencher"/)).toBeVisible();
+      page.on("dialog", (dialog) => void dialog.accept());
+
+      // Leituras sem conta certa ficam visíveis: a ambígua pede escolha, a ilegível não preenche nada.
+      const reader = page.getByRole("region", { name: "Leitor de prints dos bancos" });
+      await expect(reader.getByText(/Mais de uma conta possível/)).toBeVisible();
+      await expect(reader.getByText(/Não lido \(R\$ ••••\)/)).toBeVisible();
+      await reader.getByLabel("Conta para o saldo lido de XP — Patrimônio total").selectOption({ label: "Tatiane — Investimentos" });
+      await reader.getByRole("button", { name: "Preencher 3 campos" }).click();
+
+      await expect(page.getByLabel("Saldo de Bruno — Nubank", { exact: true })).toHaveValue("12345.67");
+      await expect(page.getByLabel("Saldo de Bruno — VR", { exact: true })).toHaveValue("512.30");
+      await expect(page.getByLabel("Saldo de Tatiane — Investimentos", { exact: true })).toHaveValue("45000.00");
+      await expect(page.getByText("do print", { exact: true })).toHaveCount(3);
+
+      // Editar um valor lido tira a marca: ele passa a contar como digitado.
+      await page.getByLabel("Saldo de Tatiane — Investimentos", { exact: true }).fill("45000.5");
+      await expect(page.getByText("do print", { exact: true })).toHaveCount(2);
+
+      // Só o botão humano grava (com a confirmação de contas zeradas aceita acima).
+      await page.getByRole("button", { name: "Salvar e revisar" }).click();
+      await expect(page.getByText("Saldos e notas salvos; prévia recalculada.")).toBeVisible({ timeout: 30_000 });
+
+      const saved = await draftAmounts();
+      expect(saved).toEqual(
+        expect.arrayContaining([
+          { label: "Bruno — Nubank", amount: 12345.67, source: "ai_extracted" },
+          { label: "Bruno — VR", amount: 512.3, source: "ai_extracted" },
+          { label: "Tatiane — Investimentos", amount: 45000.5, source: "manual" },
+          { label: "Tatiane — Caixa", amount: 0, source: "manual" },
+        ]),
+      );
+      expect(provider.calls).toHaveLength(1);
+    } finally {
+      await provider.close();
+    }
   });
 });
 

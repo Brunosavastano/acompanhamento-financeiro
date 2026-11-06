@@ -38,6 +38,9 @@ enum PositionSource {
   manual
   import
   adjustment
+  // Saldo pré-preenchido pelo leitor de prints e salvo pelo botão humano sem
+  // alteração do valor lido (rastreabilidade; a IA nunca grava sozinha).
+  ai_extracted
 }
 
 enum DebtSource {

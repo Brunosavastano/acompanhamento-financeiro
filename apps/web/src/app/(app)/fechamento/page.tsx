@@ -4,6 +4,7 @@ import { MonthlyCloseWizard } from "@/components/monthly-close-wizard";
 import { getRequiredPageHouseholdId } from "@/lib/authz";
 import { nextMonth } from "@/lib/date";
 import { prisma } from "@/lib/prisma";
+import { isVisionReaderAvailable } from "@/server/ai";
 import { getDefaultSelicAnnual } from "@/server/interest-rates";
 
 export default async function FechamentoPage({
@@ -44,6 +45,7 @@ export default async function FechamentoPage({
           defaultPeriod={defaultDate.toISOString().slice(0, 10)}
           defaultSelicAnnual={defaultSelicAnnual}
           initialSnapshotId={snapshot}
+          aiReaderAvailable={isVisionReaderAvailable()}
           accounts={accounts.map((account) => ({
             id: account.id,
             name: account.name,
