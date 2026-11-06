@@ -559,7 +559,7 @@ function requiredGoalCagr(
   }
 }
 
-async function calculateBudgetProjectionForPeriod(householdId: string, budgetItems: BudgetItem[], periodMonth: string | Date) {
+export async function calculateBudgetProjectionForPeriod(householdId: string, budgetItems: BudgetItem[], periodMonth: string | Date) {
   const monthStart = asMonthStart(periodMonth);
   const cardWindowStart = asMonthStart(addMonths(monthStart, -11));
   const cardCashflows = await prisma.debtCashflow.findMany({

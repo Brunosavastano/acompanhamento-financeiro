@@ -3,6 +3,7 @@ import path from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 import bcrypt from "bcryptjs";
 import { PrismaClient } from "@prisma/client";
+import * as XLSX from "xlsx";
 
 loadDotEnv();
 
@@ -24,7 +25,7 @@ test.describe.serial("private finance app", () => {
     await prisma.$disconnect();
   });
 
-  test("logs in, imports the workbook, loads dashboard and exports backup", async ({ page }) => {
+  test("logs in, imports the workbook, loads dashboard and exports backup and spreadsheet", async ({ page }) => {
     test.skip(!fs.existsSync(workbookPath), `Workbook not found: ${workbookPath}`);
 
     await login(page);
@@ -67,6 +68,18 @@ test.describe.serial("private finance app", () => {
     expect(backup.snapshots.length).toBeGreaterThanOrEqual(14);
     expect(backup.goals).toHaveLength(20);
     expect(backup.goals.some((goal: { title: string }) => goal.title === "TOTAL GERAL:" || goal.title === "MARCO")).toBe(false);
+
+    // Planilha só para leitura: o resumo mensal fecha com o patrimônio da visão geral.
+    await page.goto("/relatorios");
+    const downloading = page.waitForEvent("download");
+    await page.getByRole("link", { name: "Baixar planilha atualizada (.xlsx)" }).click();
+    const download = await downloading;
+    expect(download.suggestedFilename()).toBe("relatorio-financeiro-2026-05.xlsx");
+    const workbook = XLSX.read(fs.readFileSync(await download.path()), { type: "buffer" });
+    expect(workbook.SheetNames).toEqual(["Resumo mensal", "Contas mês a mês", "Dívidas do cartão", "Orçamento", "Metas"]);
+    const summary = XLSX.utils.sheet_to_json<unknown[]>(workbook.Sheets["Resumo mensal"], { header: 1 });
+    expect(summary).toHaveLength(15);
+    expect(summary.at(-1)?.[5]).toBe(275223.18);
   });
 
   test("opens each person's page from the menu", async ({ page }) => {

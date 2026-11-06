@@ -1,4 +1,5 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import * as XLSX from "xlsx";
 import { prisma } from "@/lib/prisma";
 import { POST as createSnapshot } from "@/app/api/monthly-snapshots/route";
 import { DELETE as deleteSnapshot, PATCH as updateSnapshot } from "@/app/api/monthly-snapshots/[id]/route";
@@ -23,9 +24,11 @@ import { POST as createAccount } from "@/app/api/accounts/route";
 import { DELETE as deleteAccount, PUT as updateAccount } from "@/app/api/accounts/[id]/route";
 import { GET as listAuditLogs } from "@/app/api/audit-logs/route";
 import { GET as exportBackup } from "@/app/api/backup/export/route";
+import { GET as exportXlsx } from "@/app/api/export/xlsx/route";
 import { getEvolutionData, getPersonPageData } from "@/server/evolution";
 import { getSnapshotHistory } from "@/server/metrics";
 import { debtRows, summaryRows } from "@/lib/evolution";
+import { excelMonth } from "@/lib/export-workbook";
 
 const mockedAuth = vi.hoisted(() => ({
   householdId: "api-test-household",
@@ -808,6 +811,137 @@ describe.skipIf(!runDbTests)("API route integration flows", () => {
     expect((await prisma.monthlySnapshot.findUniqueOrThrow({ where: { id: march.id } })).status).toBe("closed");
     // ...e o mês volta a poder ser revisado.
     expect((await reviseSnapshot(jsonRequest({ notes: "Revisar de novo" }), routeParams({ id: march.id }))).status).toBe(201);
+  });
+
+  it("exports a read-only workbook with the same numbers as the app", async () => {
+    const bruno = await prisma.person.findFirstOrThrow({ where: { householdId: mockedAuth.householdId, name: "Bruno" } });
+    const tatiane = await prisma.person.findFirstOrThrow({ where: { householdId: mockedAuth.householdId, name: "Tatiane" } });
+    await prisma.account.create({ data: { personId: bruno.id, name: "VR", accountType: "benefit" } });
+    await prisma.account.create({ data: { personId: tatiane.id, name: "Cashback", accountType: "cashback" } });
+
+    for (const item of [
+      { personId: bruno.id, name: "Salário", kind: "income", amountMonthly: 5000, startMonth: "2038-01" },
+      { name: "Aluguel", kind: "fixed_expense", amountMonthly: 2000, startMonth: "2038-01" },
+      { name: "Mercado", kind: "variable_expense", amountMonthly: 800, startMonth: "2038-01" },
+      // Não contam em fevereiro: pontual de janeiro e item inativo.
+      { name: "Viagem", kind: "variable_expense", amountMonthly: 3000, recurrence: "one_off", startMonth: "2038-01" },
+      { name: "Academia", kind: "fixed_expense", amountMonthly: 150, startMonth: "2038-01", isActive: false },
+    ]) {
+      expect((await createBudget(jsonRequest(item))).status).toBe(201);
+    }
+
+    const fill = async (snapshotId: string, amounts: Record<string, number>) => {
+      for (const position of await prisma.position.findMany({ where: { snapshotId }, include: { account: true } })) {
+        const response = await updatePosition(
+          jsonRequest({ personId: position.personId, accountId: position.accountId, category: position.category, amount: amounts[position.account?.name ?? ""] }),
+          routeParams({ id: snapshotId, positionId: position.id }),
+        );
+        expect(response.status).toBe(200);
+      }
+    };
+    const close = async (snapshotId: string) =>
+      expect((await closeSnapshot(new Request("http://test.local", { method: "POST" }), routeParams({ id: snapshotId }))).status).toBe(200);
+
+    // Janeiro: fatura do mês e uma parcela de fevereiro (entra a valor presente).
+    const january = await (await createSnapshot(jsonRequest({ periodMonth: "2038-01", selicAnnual: 0.12 }))).json();
+    await fill(january.id, { "Conta teste": 1000, VR: 200, "Investimento teste": 3000, Cashback: 50 });
+    await createDebt(jsonRequest({ personId: bruno.id, cardName: "Cartão principal", invoiceMonth: "2038-01", paymentMonth: "2038-01", amount: 400 }));
+    await createDebt(
+      jsonRequest({ personId: bruno.id, cardName: "Cartão principal", invoiceMonth: "2038-01", paymentMonth: "2038-02", amount: 1000, description: "Parcela do sofá" }),
+    );
+    await close(january.id);
+
+    // Fevereiro fechado e depois revisado: vale a última revisão.
+    const february = await (await createSnapshot(jsonRequest({ periodMonth: "2038-02", selicAnnual: 0.12 }))).json();
+    await fill(february.id, { "Conta teste": 1500, VR: 100, "Investimento teste": 3200, Cashback: 60 });
+    await createDebt(jsonRequest({ personId: bruno.id, cardName: "Cartão principal", invoiceMonth: "2038-02", paymentMonth: "2038-02", amount: 900 }));
+    await close(february.id);
+    const revision = await (await reviseSnapshot(jsonRequest({ notes: "Saldo corrigido" }), routeParams({ id: february.id }))).json();
+    await fill(revision.id, { "Conta teste": 1700, VR: 100, "Investimento teste": 3200, Cashback: 60 });
+    await close(revision.id);
+
+    await createGoal(
+      jsonRequest({ title: "PL 10 mil", horizon: "short", metricKey: "pl_total", targetValue: 10000, targetDate: "2038-12", comparisonOperator: "greater_or_equal" }),
+    );
+    await createGoal(
+      jsonRequest({ title: "Curso de finanças", horizon: "medium", metricKey: "curso", targetValue: "Concluir", comparisonOperator: "manual", manualCurrentValue: "Matriculado" }),
+    );
+
+    const response = await exportXlsx();
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    expect(response.headers.get("content-disposition")).toBe('attachment; filename="relatorio-financeiro-2038-02.xlsx"');
+    expect(response.headers.get("cache-control")).toContain("no-store");
+    const workbook = XLSX.read(Buffer.from(await response.arrayBuffer()), { type: "buffer" });
+    expect(workbook.SheetNames).toEqual(["Resumo mensal", "Contas mês a mês", "Dívidas do cartão", "Orçamento", "Metas"]);
+    const rows = (name: string) => XLSX.utils.sheet_to_json<unknown[]>(workbook.Sheets[name], { header: 1, raw: true, defval: null });
+
+    // Resumo mensal = histórico do dashboard: VR/VA no caixa, cashback nos
+    // investimentos, dívida a valor presente e a última revisão de fevereiro.
+    const history = await getSnapshotHistory(mockedAuth.householdId);
+    expect(history.map((row) => [row.month, row.cashTotal, row.investmentsTotal, row.debtPvTotal, row.netWorth, row.monthlyVariation])).toEqual([
+      ["2038-01", 1200, 3050, 1390.6, 2859.4, 0],
+      ["2038-02", 1800, 3260, 900, 4160, 1300.6],
+    ]);
+    expect(rows("Resumo mensal").slice(1)).toEqual(
+      history.map((row, index) => [
+        excelMonth(row.month),
+        row.cashTotal,
+        row.investmentsTotal,
+        row.assetsTotal,
+        row.debtPvTotal,
+        row.netWorth,
+        index === 0 ? null : row.monthlyVariation,
+        row.debtToAssets,
+        row.reserveMonths,
+        index === 0 ? null : row.patrimonialSavingsRate,
+      ]),
+    );
+
+    // Contas mês a mês: o patrimônio da família fecha com o resumo; cada pessoa tem o seu bloco.
+    const accounts = rows("Contas mês a mês");
+    const line = (scope: string, label: string) => accounts.find((row) => row[0] === scope && row[1] === label)?.slice(2);
+    expect(accounts[0].slice(2)).toEqual([excelMonth("2038-01"), excelMonth("2038-02")]);
+    expect(line("Família", "Patrimônio líquido")).toEqual(history.map((row) => row.netWorth));
+    expect(line("Família", "Bruno — VR (VR/VA)")).toEqual([200, 100]);
+    expect(line("Bruno", "Total em caixa")).toEqual([1200, 1800]);
+    expect(line("Bruno", "Dívidas do cartão (valor presente)")).toEqual([1390.6, 900]);
+    expect(line("Tatiane", "Total investido")).toEqual([3050, 3260]);
+
+    // Todos os lançamentos do cartão, da base mais recente para a mais antiga.
+    expect(rows("Dívidas do cartão").slice(1)).toEqual([
+      [excelMonth("2038-02"), excelMonth("2038-02"), "Bruno", "Cartão principal", 900, null],
+      [excelMonth("2038-01"), excelMonth("2038-01"), "Bruno", "Cartão principal", 400, null],
+      [excelMonth("2038-01"), excelMonth("2038-02"), "Bruno", "Cartão principal", 1000, "Parcela do sofá"],
+    ]);
+
+    // Orçamento de fevereiro: os itens que contam, a média do cartão e os totais da página.
+    const { metrics } = await (await getBudget(new Request("http://test.local/api/budget?period_month=2038-02"))).json();
+    expect(metrics).toMatchObject({ incomeTotal: 5000, fixedExpenseTotal: 2000, variableExpenseTotal: 1450, monthlySurplus: 1550 });
+    const budget = rows("Orçamento");
+    expect(budget.slice(1, 5).map((row) => [row[0], row[1], row[2], row[3]])).toEqual([
+      ["Entrada", "Salário", "Bruno", 5000],
+      ["Despesa fixa", "Aluguel", "Familiar", 2000],
+      ["Despesa variável", "Cartão (média 2 meses)", null, metrics.cardMovingAverageAppliedExpense],
+      ["Despesa variável", "Mercado", "Familiar", 800],
+    ]);
+    expect(budget.some((row) => row[1] === "Viagem" || row[1] === "Academia")).toBe(false);
+    const total = (label: string) => budget.find((row) => row[0] === label)?.[3];
+    expect([total("Renda total"), total("Despesas fixas"), total("Variáveis + cartão"), total("Sobra planejada")]).toEqual([
+      metrics.incomeTotal,
+      metrics.fixedExpenseTotal,
+      metrics.variableExpenseTotal,
+      metrics.monthlySurplus,
+    ]);
+
+    // Metas com o progresso da página Metas no mesmo mês.
+    const goals = await (await listGoals(new Request("http://test.local/api/goals?period_month=2038-02"))).json();
+    const goalRow = (title: string) => rows("Metas").find((row) => row[1] === title);
+    for (const goal of goals) {
+      expect(goalRow(goal.title)?.slice(2, 5)).toEqual([goal.currentNumeric ?? goal.currentValue, goal.targetNumeric ?? goal.targetValue, goal.progressPct]);
+    }
+    expect(goalRow("PL 10 mil")?.slice(2, 6)).toEqual([4160, 10000, 0.416, "Atenção"]);
+    expect(goalRow("Curso de finanças")?.slice(2, 4)).toEqual(["Matriculado", "Concluir"]);
   });
 
   it("manages people and accounts through settings API routes", async () => {
