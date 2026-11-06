@@ -124,53 +124,67 @@ export const importExcelSchema = z.object({
   filePath: z.string().min(1).optional(),
 });
 
-// --- IA: leitor de prints ---------------------------------------------------
+// --- IA: leitor de prints de saldos (passo 2 do fechamento) -----------------
 
-// Saída ESTRUTURADA que o modelo de visão deve produzir (generateObject).
-// O modelo devolve `candidateIndex` (1..N no inventário montado no servidor),
-// nunca um id de conta — e `amountRaw` é a string vista no print, normalizada
-// depois pelo servidor (nunca pelo modelo).
-export const statementReadSchema = z.object({
+// Saída ESTRUTURADA do modelo de visão para prints de apps de banco, corretora
+// e benefícios. O modelo só DESCREVE o que vê (banco, rótulo, titular, tipo e o
+// valor como texto): o casamento com as contas da família e a normalização do
+// valor são do servidor, nunca do modelo. Sem limites de tamanho/intervalo aqui
+// de propósito — um texto longo não pode derrubar a leitura inteira; o servidor
+// corta e confere depois.
+export const balanceReadModelSchema = z.object({
   reads: z.array(
     z.object({
-      candidateIndex: z.number().int().min(1).nullable(),
-      detectedInstitution: z.string().max(80),
-      detectedHolder: z.string().max(80).nullable(),
-      suggestedCategory: z.enum(["cash", "benefit", "investment", "cashback", "other"]),
-      amountRaw: z.string().max(32),
-      confidence: z.number().min(0).max(1),
-      note: z.string().max(160).nullable(),
+      imageIndex: z.number().nullable(),
+      institution: z.string(),
+      accountLabel: z.string().nullable(),
+      holderName: z.string().nullable(),
+      kind: z.enum(["cash", "benefit", "investment", "cashback", "other"]),
+      amountRaw: z.string(),
+      excerpt: z.string(),
+      confidence: z.number(),
+      note: z.string().nullable(),
     }),
   ),
-  warnings: z.array(z.string().max(160)),
+  warnings: z.array(z.string()),
 });
-export type StatementReadModelOutput = z.infer<typeof statementReadSchema>;
+export type BalanceReadModelOutput = z.infer<typeof balanceReadModelSchema>;
 
-export type StatementReadFlag =
+export type BalanceReadFlag =
   | "unparseable"
   | "ambiguous_magnitude"
+  | "low_confidence"
   | "large_delta"
   | "no_match"
-  | "low_confidence"
-  | "collision";
+  | "ambiguous_match"
+  | "weak_match"
+  | "kind_mismatch"
+  | "duplicate_target"
+  | "holder_unmatched";
 
-// Resposta que a rota devolve ao cliente (já normalizada e conferida no servidor).
-export type StatementReadResultRow = {
-  candidateIndex: number | null;
-  positionId: string | null;
-  accountLabel: string;
+// Resposta da rota ao cliente: cada leitura com o valor normalizado no servidor
+// e a conta SUGERIDA (linha do rascunho), para a pessoa confirmar ou trocar.
+export type BalanceReadRow = {
+  imageIndex: number | null; // 1 = primeiro print enviado
   detectedInstitution: string;
+  detectedLabel: string | null;
+  detectedHolder: string | null;
+  kind: "cash" | "benefit" | "investment" | "cashback" | "other";
+  excerpt: string; // trecho lido no print, como exibido
+  amountRaw: string; // valor como exibido no print
   amount: string | null; // decimal com ponto ("1234.56"), ou null se não parseável
-  previousAmount: string | null;
-  deltaFactor: number | null;
-  flags: StatementReadFlag[];
-  confidence: number;
+  confidence: number; // 0 a 1, do modelo, sobre a leitura do valor
+  positionId: string | null; // linha sugerida do rascunho, ou null
+  positionLabel: string | null; // "Pessoa — Conta" da sugestão
+  matchReason: "name" | "category" | null;
+  candidatePositionIds: string[]; // alternativas quando o casamento não é único
+  previousAmount: string | null; // saldo da conta sugerida no último fechamento
+  flags: BalanceReadFlag[];
   note: string | null;
 };
-export type StatementReadResult = {
-  reads: StatementReadResultRow[];
+export type BalanceReadResult = {
+  reads: BalanceReadRow[];
   warnings: string[];
-  notFilled: Array<{ positionId: string; accountLabel: string }>;
 };
 
 // --- IA: leitor de print de fatura (Cartão e dívidas) -----------------------

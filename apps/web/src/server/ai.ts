@@ -103,11 +103,41 @@ export function isVisionReaderAvailable(): boolean {
   }
 }
 
-/** Opções padrão de chamada: timeout duro + no máximo 1 retry, para limitar custo/latência. */
-export function aiCallDefaults(): { maxRetries: number; abortSignal: AbortSignal } {
+/**
+ * Opções padrão de chamada: timeout duro + no máximo 1 retry, para limitar
+ * custo/latência. Leituras com vários prints ganham 8 s por print extra, até
+ * 55 s (abaixo do maxDuration de 60 s das rotas), salvo AI_TIMEOUT_MS maior.
+ */
+export function aiCallDefaults(options?: { images?: number }): { maxRetries: number; abortSignal: AbortSignal } {
+  const base = envInt("AI_TIMEOUT_MS", 20000);
+  const extraImages = Math.max(0, (options?.images ?? 1) - 1);
   return {
     maxRetries: 1,
-    abortSignal: AbortSignal.timeout(envInt("AI_TIMEOUT_MS", 20000)),
+    abortSignal: AbortSignal.timeout(Math.min(base + extraImages * 8000, Math.max(base, 55000))),
+  };
+}
+
+/** Timeout do AbortSignal, direto ou embrulhado pelo SDK (cause / lastError do retry). */
+export function isAiTimeout(error: unknown): boolean {
+  const named = (value: unknown) => value instanceof Error && value.name === "TimeoutError";
+  if (named(error)) return true;
+  const wrapped = error as { cause?: unknown; lastError?: unknown } | null;
+  return Boolean(wrapped && (named(wrapped.cause) || named(wrapped.lastError)));
+}
+
+/**
+ * Resumo de um erro do provedor para o LOG do servidor. O erro completo do SDK
+ * traz o corpo da requisição (os prints em base64, com saldos) — não pode ir
+ * para o log inteiro. Ao cliente vai sempre uma mensagem genérica.
+ */
+export function describeAiError(error: unknown): Record<string, unknown> {
+  if (!(error instanceof Error)) return { error: String(error).slice(0, 300) };
+  const details = error as Error & { statusCode?: unknown; cause?: unknown };
+  return {
+    name: error.name,
+    message: error.message.slice(0, 300),
+    ...(typeof details.statusCode === "number" ? { statusCode: details.statusCode } : {}),
+    ...(details.cause instanceof Error ? { cause: `${details.cause.name}: ${details.cause.message.slice(0, 200)}` } : {}),
   };
 }
 

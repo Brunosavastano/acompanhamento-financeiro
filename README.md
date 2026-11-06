@@ -106,6 +106,25 @@ npm run prod:check -- --env-file apps/web/.env.production.local
 `npm run test:api` exige um Postgres ativo, por exemplo com `npm run db:embedded`.
 `npm run test:e2e` reutiliza `http://localhost:3001` se o app ja estiver rodando; caso contrario, tenta subir `npm run dev:local`. A suite cria uma familia temporaria `e2e-app-*`, importa a planilha por upload e remove os dados ao final.
 
+O passo de E2E do leitor de prints de saldos usa um provedor de visao simulado (`apps/web/e2e/mock-vision-provider.ts`), que responde como a API da OpenAI: nenhuma chave real nem chamada externa. Ele so roda quando `E2E_AI_MOCK_PORT` esta definido e o app foi iniciado apontando a IA para essa porta. Caminho estavel (build de producao em vez do modo dev):
+
+```bash
+cd apps/web
+npx next build
+AI_FEATURES_ENABLED=true AI_PROVIDER=openai AI_VISION_MODEL=e2e-vision OPENAI_API_KEY=e2e-fake OPENAI_BASE_URL=http://127.0.0.1:4010/v1 npx next start -p 3001
+# em outro terminal, tambem em apps/web:
+E2E_SKIP_WEBSERVER=true E2E_AI_MOCK_PORT=4010 npx playwright test
+```
+
+## Leitor de prints com IA
+
+Opcional e desligado por padrao (`AI_FEATURES_ENABLED=false`). Com a IA configurada (`AI_PROVIDER`, `AI_VISION_MODEL` e a chave do provedor, veja `apps/web/.env.example`):
+
+- **Cartao e dividas**: le prints de "proximas faturas" e pre-preenche a grade de varios meses (`POST /api/debts/statement-read`).
+- **Fechamento, passo 2**: le prints dos apps dos bancos (ate 6 por vez) e sugere a conta de cada saldo (`POST /api/monthly-snapshots/[id]/balance-read`). A pessoa confirma ou troca cada conta, clica em "Preencher" e os valores entram nos campos marcados "do print".
+
+Nos dois casos a IA nunca grava: o modelo so descreve o que ve, o servidor normaliza os valores com `parseBrMoney` e casa as contas por regras fixas, e o unico gravador e o botao humano de salvar. Um saldo salvo sem alteracao do valor lido fica com `source = ai_extracted` (migration `0003_position_source_ai_extracted`).
+
 ## Escopo implementado no MVP
 
 - Dashboard autenticado com KPIs, graficos e indicadores recalculados pelo app.

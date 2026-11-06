@@ -1,6 +1,8 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import * as XLSX from "xlsx";
+import { MockLanguageModelV4 } from "ai/test";
 import { prisma } from "@/lib/prisma";
+import { POST as readBalancePrints } from "@/app/api/monthly-snapshots/[id]/balance-read/route";
 import { POST as createSnapshot } from "@/app/api/monthly-snapshots/route";
 import { DELETE as deleteSnapshot, PATCH as updateSnapshot } from "@/app/api/monthly-snapshots/[id]/route";
 import { GET as previewSnapshot } from "@/app/api/monthly-snapshots/[id]/preview/route";
@@ -40,6 +42,20 @@ vi.mock("@/lib/authz", () => ({
   getRequiredPageHouseholdId: async () => mockedAuth.householdId,
   getCurrentUserId: async () => mockedAuth.userId,
 }));
+
+// Leitor de prints: o provedor de IA nunca é chamado nos testes. O modelo de
+// visão é um mock; o resto da camada de IA (flags, limites, erros) é o real.
+const mockedVision = vi.hoisted(() => ({ model: null as unknown }));
+vi.mock("@/server/ai", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/server/ai")>();
+  return {
+    ...actual,
+    getVisionModel: () => {
+      if (!mockedVision.model) throw new actual.AiConfigError("Modelo de visão de teste não configurado.");
+      return mockedVision.model;
+    },
+  };
+});
 
 const runDbTests = process.env.RUN_DB_TESTS === "true";
 
@@ -1114,7 +1130,159 @@ describe.skipIf(!runDbTests)("API route integration flows", () => {
     await expect(prisma.budgetItem.findUnique({ where: { id: budget.id } })).resolves.toBeNull();
     await expect(prisma.debtCashflow.findUnique({ where: { id: debt.id } })).resolves.toBeNull();
   });
+
+  it("reads balance prints for review without writing, and records provenance only through the human save", async () => {
+    const previousAiFlag = process.env.AI_FEATURES_ENABLED;
+    process.env.AI_FEATURES_ENABLED = "true";
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    try {
+      // Fechamento anterior com saldos: base da conferência "muito diferente do mês anterior".
+      const march = await (await createSnapshot(jsonRequest({ periodMonth: "2035-03", selicAnnual: 0.12 }))).json();
+      for (const position of march.positions) {
+        const response = await updatePosition(
+          jsonRequest({
+            personId: position.personId,
+            accountId: position.accountId,
+            category: position.category,
+            amount: position.category === "investment" ? 4000 : 1000,
+          }),
+          routeParams({ id: march.id, positionId: position.id }),
+        );
+        expect(response.status).toBe(200);
+      }
+      expect((await closeSnapshot(new Request("http://test.local", { method: "POST" }), routeParams({ id: march.id }))).status).toBe(200);
+
+      const aprilResponse = await createSnapshot(jsonRequest({ periodMonth: "2035-04", selicAnnual: 0.12 }));
+      expect(aprilResponse.status).toBe(201);
+      const april = await aprilResponse.json();
+      const cash = april.positions.find((position: { category: string }) => position.category === "cash");
+      const investment = april.positions.find((position: { category: string }) => position.category === "investment");
+      const aprilPositionIds = april.positions.map((position: { id: string }) => position.id);
+
+      const model = new MockLanguageModelV4({
+        doGenerate: visionResult({
+          reads: [
+            { imageIndex: 1, institution: "Banco Teste", accountLabel: "Conta", holderName: "Olá, Bruno", kind: "cash", amountRaw: "R$ 1.234,56", excerpt: "Saldo em conta R$ 1.234,56", confidence: 0.97, note: null },
+            { imageIndex: 2, institution: "XP", accountLabel: "Patrimônio total", holderName: null, kind: "investment", amountRaw: "R$ 45.000,00", excerpt: "Patrimônio total R$ 45.000,00", confidence: 0.9, note: null },
+            { imageIndex: 2, institution: "Banco Desconhecido", accountLabel: null, holderName: null, kind: "other", amountRaw: "R$ 10,00", excerpt: "Saldo R$ 10,00", confidence: 0.8, note: null },
+          ],
+          warnings: [],
+        }),
+      });
+      mockedVision.model = model;
+
+      const readResponse = await readBalancePrints(
+        printsRequest([{ name: "banco.png", type: "image/png" }, { name: "xp.jpg", type: "image/jpeg" }]),
+        routeParams({ id: april.id }),
+      );
+      expect(readResponse.status).toBe(200);
+      const read = await readResponse.json();
+      expect(model.doGenerateCalls).toHaveLength(1);
+      expect(read.warnings).toEqual([]);
+      expect(read.reads).toHaveLength(3);
+      expect(read.reads[0]).toMatchObject({
+        positionId: cash.id,
+        positionLabel: "Bruno — Conta teste",
+        amount: "1234.56",
+        previousAmount: "1000.00",
+        matchReason: "name",
+        excerpt: "Saldo em conta R$ 1.234,56",
+        flags: [],
+      });
+      expect(read.reads[1]).toMatchObject({ positionId: investment.id, positionLabel: "Tatiane — Investimento teste", amount: "45000.00", previousAmount: "4000.00" });
+      expect(read.reads[1].flags).toEqual(["large_delta"]);
+      // Conta não reconhecida volta visível, com valor, para a pessoa decidir.
+      expect(read.reads[2]).toMatchObject({ positionId: null, amount: "10.00", flags: ["no_match"] });
+
+      // A leitura é só retorno: nenhum saldo, proveniência ou auditoria mudou.
+      const untouched = await prisma.position.findMany({ where: { snapshotId: april.id } });
+      expect(untouched.map((position) => [Number(position.amount), position.source])).toEqual(untouched.map(() => [0, "manual"]));
+      expect(await prisma.auditLog.count({ where: { entityId: { in: aprilPositionIds } } })).toBe(0);
+
+      // Só o salvar humano grava; o valor lido e mantido fica marcado como ai_extracted.
+      const fromPrint = await updatePosition(
+        jsonRequest({ personId: cash.personId, accountId: cash.accountId, category: cash.category, amount: 1234.56, source: "ai_extracted" }),
+        routeParams({ id: april.id, positionId: cash.id }),
+      );
+      expect(fromPrint.status).toBe(200);
+      expect(await fromPrint.json()).toMatchObject({ source: "ai_extracted" });
+      const typed = await updatePosition(
+        jsonRequest({ personId: investment.personId, accountId: investment.accountId, category: investment.category, amount: 45000.5 }),
+        routeParams({ id: april.id, positionId: investment.id }),
+      );
+      expect(await typed.json()).toMatchObject({ source: "manual" });
+      const audited = await prisma.auditLog.findFirst({ where: { entityId: cash.id, action: "update" } });
+      expect((audited?.newValue as { source?: string } | null)?.source).toBe("ai_extracted");
+      // O cliente não pode se declarar importação ou ajuste.
+      const forged = await updatePosition(
+        jsonRequest({ personId: cash.personId, accountId: cash.accountId, category: cash.category, amount: 1, source: "import" }),
+        routeParams({ id: april.id, positionId: cash.id }),
+      );
+      expect(forged.status).toBe(400);
+
+      // Tamanho conferido pelo Content-Length ANTES de materializar o corpo.
+      const oversized = printsRequest([{ name: "grande.png", type: "image/png" }], {}, { "content-length": String(10 ** 9) });
+      const formDataSpy = vi.spyOn(oversized, "formData");
+      expect((await readBalancePrints(oversized, routeParams({ id: april.id }))).status).toBe(413);
+      expect(formDataSpy).not.toHaveBeenCalled();
+
+      const png = [{ name: "print.png", type: "image/png" }];
+      expect((await readBalancePrints(printsRequest([{ name: "extrato.pdf", type: "application/pdf" }]), routeParams({ id: april.id }))).status).toBe(400);
+      expect((await readBalancePrints(printsRequest(Array.from({ length: 7 }, () => png[0])), routeParams({ id: april.id }))).status).toBe(400);
+      expect((await readBalancePrints(printsRequest(png, { personId: "pessoa-de-outra-familia" }), routeParams({ id: april.id }))).status).toBe(400);
+      expect((await readBalancePrints(printsRequest(png), routeParams({ id: march.id }))).status).toBe(409);
+      expect((await readBalancePrints(printsRequest(png), routeParams({ id: "fechamento-de-outra-familia" }))).status).toBe(404);
+
+      // Erros do provedor não vazam ao cliente (nem fragmento de chave).
+      mockedVision.model = new MockLanguageModelV4({
+        doGenerate: async () => {
+          throw new Error("401 Incorrect API key provided: sk-proj-SEGREDO123");
+        },
+      });
+      const failed = await readBalancePrints(printsRequest(png), routeParams({ id: april.id }));
+      expect(failed.status).toBe(502);
+      const failedBody = await failed.text();
+      expect(failedBody).not.toContain("SEGREDO");
+      expect(JSON.parse(failedBody).error).toBe("Não foi possível ler os prints agora. Tente novamente em instantes.");
+
+      mockedVision.model = new MockLanguageModelV4({
+        doGenerate: async () => {
+          throw new DOMException("The operation was aborted due to timeout", "TimeoutError");
+        },
+      });
+      expect((await readBalancePrints(printsRequest(png), routeParams({ id: april.id }))).status).toBe(504);
+
+      process.env.AI_FEATURES_ENABLED = "false";
+      expect((await readBalancePrints(printsRequest(png), routeParams({ id: april.id }))).status).toBe(503);
+    } finally {
+      mockedVision.model = null;
+      consoleError.mockRestore();
+      if (previousAiFlag === undefined) delete process.env.AI_FEATURES_ENABLED;
+      else process.env.AI_FEATURES_ENABLED = previousAiFlag;
+    }
+  });
 });
+
+/** Requisição multipart como a do navegador: prints no campo "images". */
+function printsRequest(files: Array<{ name: string; type: string }>, fields: Record<string, string> = {}, headers?: Record<string, string>) {
+  const form = new FormData();
+  for (const file of files) form.append("images", new File([new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10])], file.name, { type: file.type }));
+  for (const [key, value] of Object.entries(fields)) form.append(key, value);
+  return new Request("http://test.local", { method: "POST", body: form, headers });
+}
+
+/** Resposta estruturada do modelo de visão simulado (nada sai para o provedor). */
+function visionResult(output: unknown) {
+  return {
+    content: [{ type: "text" as const, text: JSON.stringify(output) }],
+    finishReason: { unified: "stop" as const, raw: "stop" },
+    usage: {
+      inputTokens: { total: 100, noCache: 100, cacheRead: 0, cacheWrite: 0 },
+      outputTokens: { total: 50, text: 50, reasoning: 0 },
+    },
+    warnings: [],
+  };
+}
 
 function jsonRequest(body: unknown) {
   return new Request("http://test.local", {

@@ -9,7 +9,6 @@ import {
   Copy,
   CreditCard,
   History,
-  ImageUp,
   Loader2,
   Plus,
   RotateCcw,
@@ -17,6 +16,7 @@ import {
   WalletCards,
 } from "lucide-react";
 import { clsx } from "clsx";
+import { BalancePrintReader, emptyPrintReadState, pendingPrintRows, type PrintReadState } from "@/components/balance-print-reader";
 import { Button, Input, Select } from "@/components/ui";
 import { currency, number, percent } from "@/lib/format";
 
@@ -38,6 +38,8 @@ type Position = {
   accountId: string | null;
   category: "cash" | "benefit" | "investment" | "cashback";
   amount: string | number;
+  /** Proveniência gravada: "ai_extracted" quando o saldo salvo veio de um print. */
+  source?: string;
   createdAt?: string;
   account: { name: string } | null;
   person: { name: string };
@@ -143,11 +145,13 @@ export function MonthlyCloseWizard({
   defaultSelicAnnual,
   accounts,
   initialSnapshotId,
+  aiReaderAvailable = false,
 }: {
   defaultPeriod: string;
   defaultSelicAnnual: string;
   accounts: AccountSeed[];
   initialSnapshotId?: string;
+  aiReaderAvailable?: boolean;
 }) {
   const [step, setStep] = useState(1);
   const [periodMonth, setPeriodMonth] = useState(defaultPeriod.slice(0, 7));
@@ -158,6 +162,11 @@ export function MonthlyCloseWizard({
   const [snapshots, setSnapshots] = useState<Snapshot[]>([]);
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [amounts, setAmounts] = useState<Record<string, string>>({});
+  // Valores que vieram de prints (aplicados agora ou já salvos assim). Um campo
+  // só conta como "do print" enquanto o valor dele for o mesmo que foi lido.
+  const [printValues, setPrintValues] = useState<Record<string, string>>({});
+  // Grade do leitor de prints: fica aqui para não sumir ao trocar de passo.
+  const [printReads, setPrintReads] = useState<PrintReadState>(emptyPrintReadState);
   const [preview, setPreview] = useState<Preview | null>(null);
   const [review, setReview] = useState<Review | null>(null);
   const [loading, setLoading] = useState(false);
@@ -179,6 +188,13 @@ export function MonthlyCloseWizard({
     const index = lineInfo.indexes.get(position.id);
     const lines = position.accountId ? lineInfo.linesPerAccount.get(position.accountId) ?? 1 : 1;
     return lines > 1 && index !== undefined ? `${name} (${index + 1})` : name;
+  };
+
+  /** O campo ainda tem exatamente o valor lido do print (então grava como "ai_extracted"). */
+  const fromPrint = (positionId: string) => {
+    const read = printValues[positionId];
+    const current = String(amounts[positionId] ?? "").trim();
+    return read !== undefined && current !== "" && Number(current) === Number(read);
   };
 
   const personGroups = useMemo(() => {
@@ -348,6 +364,12 @@ export function MonthlyCloseWizard({
     setSelicStatus("Selic gravada no rascunho.");
     setNotes(hydrated.notes ?? "");
     setAmounts(Object.fromEntries(hydrated.positions.map((position) => [position.id, String(position.amount)])));
+    setPrintValues(
+      Object.fromEntries(
+        hydrated.positions.filter((position) => position.source === "ai_extracted").map((position) => [position.id, String(position.amount)]),
+      ),
+    );
+    setPrintReads(emptyPrintReadState);
     setPreview(null);
     setReview(null);
     setAddingPosition(false);
@@ -414,6 +436,8 @@ export function MonthlyCloseWizard({
     setPreview(null);
     setReview(null);
     setAmounts({});
+    setPrintValues({});
+    setPrintReads(emptyPrintReadState);
     setPeriodMonth(defaultPeriod.slice(0, 7));
     setSelicAnnual(defaultSelicAnnual);
     setSelicStatus("Selic Bacen carregada para o mês selecionado.");
@@ -556,6 +580,8 @@ export function MonthlyCloseWizard({
           accountId: position.accountId,
           category: position.category,
           amount: Number(amounts[position.id] ?? 0),
+          // Proveniência: valor lido do print e mantido como está; qualquer edição vira manual.
+          source: fromPrint(position.id) ? "ai_extracted" : "manual",
         }),
       });
       if (!response.ok) throw new Error(await readApiError(response));
@@ -574,6 +600,18 @@ export function MonthlyCloseWizard({
 
   async function savePositions(options?: { goToStep?: number }) {
     if (!snapshot) return;
+    // Saldos lidos dos prints que não foram para os campos: quem esqueceu de
+    // clicar em "Preencher" acharia que salvou os valores dos prints.
+    const pendingPrints = pendingPrintRows(printReads.rows, new Set(snapshot.positions.map((position) => position.id))).length;
+    if (pendingPrints > 0) {
+      const confirmed = window.confirm(
+        `${pendingPrints === 1 ? "1 saldo lido dos prints ainda não foi" : `${pendingPrints} saldos lidos dos prints ainda não foram`} para os campos (falta clicar em "Preencher"). Salvar sem eles?`,
+      );
+      if (!confirmed) {
+        setMessage('Saldos não salvos. Clique em "Preencher" no leitor de prints ou marque "Não aplicar" nas leituras que não quer usar.');
+        return;
+      }
+    }
     // Campo vazio não pode virar R$ 0 em silêncio: um saldo esquecido derrubaria o patrimônio do mês.
     const blanks = snapshot.positions.filter((position) => String(amounts[position.id] ?? "").trim() === "");
     if (blanks.length > 0) {
@@ -696,6 +734,25 @@ export function MonthlyCloseWizard({
     setPreview(null);
   }
 
+  /** Valores confirmados na grade do leitor de prints: só entram nos campos (nada é gravado aqui). */
+  function applyPrintValues(entries: Array<{ positionId: string; amount: string }>) {
+    const values = Object.fromEntries(entries.map((entry) => [entry.positionId, entry.amount]));
+    setAmounts((current) => ({ ...current, ...values }));
+    setPrintValues((current) => ({ ...current, ...values }));
+    setPreview(null);
+  }
+
+  // Linhas do rascunho na ordem da tela, para a grade do leitor sugerir/trocar contas.
+  const readerPositions = personGroups.flatMap((group) =>
+    group.positions.map((position) => ({
+      id: position.id,
+      personId: position.personId,
+      personName: group.name,
+      label: `${group.name} — ${positionLabel(position)}`,
+    })),
+  );
+  const readerPeople = personGroups.map((group) => ({ id: group.positions[0].personId, name: group.name }));
+
   function stepEnabled(target: number) {
     if (target === 1) return true;
     if (!snapshot) return false;
@@ -763,6 +820,20 @@ export function MonthlyCloseWizard({
               ) : null}
             </div>
 
+            {canEdit ? (
+              <BalancePrintReader
+                snapshotId={snapshot.id}
+                positions={readerPositions}
+                people={readerPeople}
+                amounts={amounts}
+                available={aiReaderAvailable}
+                disabled={loading}
+                state={printReads}
+                onStateChange={setPrintReads}
+                onApply={applyPrintValues}
+              />
+            ) : null}
+
             {personGroups.map((group) => (
               <section key={group.name} className="overflow-hidden rounded-[14px] border border-edge bg-surface">
                 <div className="flex items-center gap-3 border-b border-edge-soft bg-surface-2 px-5 py-3.5">
@@ -785,7 +856,17 @@ export function MonthlyCloseWizard({
                     >
                       <div className="min-w-0">
                         <div className="truncate text-[13px] font-medium text-body">{positionLabel(position)}</div>
-                        <div className="text-[11px] text-faint">{categoryLabels[position.category]}</div>
+                        <div className="flex items-center gap-1.5 text-[11px] text-faint">
+                          {categoryLabels[position.category]}
+                          {fromPrint(position.id) ? (
+                            <span
+                              title="Valor lido de um print. Se você editar o campo, ele passa a contar como digitado."
+                              className="rounded-full bg-gold/[0.14] px-1.5 py-px text-[10px] font-semibold text-gold-light"
+                            >
+                              do print
+                            </span>
+                          ) : null}
+                        </div>
                       </div>
                       <input
                         value={amounts[position.id] ?? ""}
@@ -794,7 +875,10 @@ export function MonthlyCloseWizard({
                         step="0.01"
                         disabled={!canEdit}
                         aria-label={`Saldo de ${position.person.name} — ${positionLabel(position)}`}
-                        className="w-full rounded-lg border border-edge bg-surface-2 px-3 py-2 text-right text-sm font-semibold tabular-nums text-snow focus:border-gold focus:outline-none disabled:opacity-60"
+                        className={clsx(
+                          "w-full rounded-lg border bg-surface-2 px-3 py-2 text-right text-sm font-semibold tabular-nums text-snow focus:border-gold focus:outline-none disabled:opacity-60",
+                          fromPrint(position.id) ? "border-gold/50" : "border-edge",
+                        )}
                       />
                       <span className="hidden text-right text-[11px] tabular-nums text-faint sm:block">
                         {previousHint(position)}
@@ -824,7 +908,12 @@ export function MonthlyCloseWizard({
                 <div className="rounded-[14px] border border-edge bg-surface p-4">
                   <div className="text-[13px] font-semibold text-snow">Adicionar posição avulsa</div>
                   <div className="mt-3 grid gap-3 sm:grid-cols-[1fr_150px_auto_auto]">
-                    <Select value={newPositionAccountId} onChange={(event) => setNewPositionAccountId(event.target.value)} className="w-full bg-surface-2">
+                    <Select
+                      value={newPositionAccountId}
+                      onChange={(event) => setNewPositionAccountId(event.target.value)}
+                      aria-label="Conta da posição avulsa"
+                      className="w-full bg-surface-2"
+                    >
                       {accounts.map((account) => (
                         <option key={account.id} value={account.id}>
                           {account.person.name} — {account.name}
@@ -863,21 +952,6 @@ export function MonthlyCloseWizard({
                 </button>
               )
             ) : null}
-
-            <div className="flex items-center gap-3 rounded-[14px] border border-dashed border-edge bg-surface/40 p-4">
-              <ImageUp className="h-5 w-5 shrink-0 text-faint" aria-hidden />
-              <div className="min-w-0">
-                <div className="flex flex-wrap items-center gap-2 text-[13px] font-medium text-body">
-                  Preencher com prints das contas
-                  <span className="rounded-full bg-elevated px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-faint">
-                    Em breve
-                  </span>
-                </div>
-                <p className="mt-0.5 text-xs text-faint">
-                  Arraste screenshots dos apps dos bancos e o assistente lê os saldos e preenche os campos para você conferir.
-                </p>
-              </div>
-            </div>
           </div>
 
           <div className="flex min-w-0 flex-col gap-4 lg:sticky lg:top-24">
