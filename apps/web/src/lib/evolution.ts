@@ -232,6 +232,44 @@ export function debtRows(data: Pick<EvolutionData, "debt">, scope: Scope): DebtR
   });
 }
 
+/** O que mudou no cartão entre dois fechamentos seguidos da lista: total(b) = total(a) − venceu + compras novas. */
+export type DebtBridge = { previousMonth: string; paid: number; added: number; from: number; to: number };
+
+/**
+ * Ponte entre o fechamento anterior e o atual (o "venceram X / compras novas Y"
+ * do painel de dívidas). `null` quando falta a declaração de alguém do recorte
+ * em um dos dois meses: a conta ficaria incompleta.
+ */
+export function debtBridge(current: DebtRow | undefined, previous: DebtRow | null): DebtBridge | null {
+  if (!current || !previous || current.missing.length > 0 || previous.missing.length > 0) return null;
+  if (previous.outstanding === null || current.outstanding === null) return null;
+  if (current.paidSincePrevious === null || current.newSincePrevious === null) return null;
+  return {
+    previousMonth: previous.month,
+    paid: current.paidSincePrevious,
+    added: current.newSincePrevious,
+    from: previous.outstanding,
+    to: current.outstanding,
+  };
+}
+
+/** Até 5% de diferença, a fatura do mês está "na média". */
+export const INVOICE_ON_AVERAGE_TOLERANCE = 0.05;
+
+export type InvoiceComparison = { month: string; invoice: number; average: number; ratio: number; projected: boolean };
+
+/** Fatura do mês contra a média dos últimos 12 meses; `ratio` = 0,23 quer dizer 23% acima. */
+export function invoiceComparison(current: DebtRow | undefined): InvoiceComparison | null {
+  if (!current || current.invoice === null || current.averageInvoice === null || current.averageInvoice <= 0) return null;
+  return {
+    month: current.month,
+    invoice: current.invoice,
+    average: current.averageInvoice,
+    ratio: current.invoice / current.averageInvoice - 1,
+    projected: current.invoiceProjected,
+  };
+}
+
 export type OutlookRow = { month: string; amount: number; remainingAfter: number };
 
 /** Parcelas a vencer por mês e quanto ainda falta pagar depois de cada uma. */

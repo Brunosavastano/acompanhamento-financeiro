@@ -42,6 +42,32 @@ test.describe.serial("private finance app", () => {
     await expect(page.getByRole("heading", { name: "Visão geral" })).toBeVisible();
     await expect(page.getByText("R$ 275.223,18").first()).toBeVisible();
 
+    // "O que mudou" no topo: a frase cita a mesma variação do selo do card de patrimônio.
+    // (Sem valores fixos aqui: o repositório é público e a planilha é da família.)
+    const insights = page.locator("section", { has: page.getByRole("heading", { name: "O que mudou em maio" }) });
+    await expect(insights.getByText(sameChangeAs(await badgeAmount(page, "maio"), "Em maio, o patrimônio da família"))).toBeVisible();
+    await expect(insights.getByText(/^No cartão, entraram R\$\s[\d.]+ em compras novas e venceram R\$\s[\d.]+ em faturas/)).toBeVisible();
+    // Pontos de atenção: ícone + texto. A planilha vai até maio, então há meses por fechar.
+    const alerts = insights.getByRole("list", { name: "Pontos de atenção" });
+    await expect(alerts.getByText(/Meses? por fechar$/)).toBeVisible();
+    await expect(alerts.getByText(/os números desta página vão até maio\.$/)).toBeVisible();
+
+    // ⓘ pelo teclado: Enter abre a explicação, Esc fecha e devolve o foco ao botão.
+    const cashInfo = page.getByRole("button", { name: "O que é o caixa disponível" });
+    await cashInfo.focus();
+    await page.keyboard.press("Enter");
+    await expect(cashInfo).toHaveAttribute("aria-expanded", "true");
+    await expect(page.getByRole("status").getByText("Dinheiro em conta mais o saldo de VR/VA")).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(cashInfo).toHaveAttribute("aria-expanded", "false");
+    await expect(cashInfo).toBeFocused();
+    // Clique abre; clicar fora fecha.
+    await page.getByRole("button", { name: "O que são as dívidas do cartão" }).click();
+    const debtExplanation = page.getByRole("status").getByText("descontada pela Selic do fechamento");
+    await expect(debtExplanation).toBeVisible();
+    await page.getByRole("heading", { name: "Visão geral" }).click();
+    await expect(debtExplanation).toHaveCount(0);
+
     // Evolução por pessoa (com a evolução de cada conta) e dívidas ao longo do tempo.
     const explorer = page.locator("section", { has: page.getByRole("heading", { name: "Evolução", exact: true }) });
     await expect(explorer.getByRole("group", { name: "Séries do gráfico" })).toBeVisible();
@@ -89,6 +115,9 @@ test.describe.serial("private finance app", () => {
     await page.getByRole("link", { name: "Tatiane", exact: true }).click();
     await expect(page.getByRole("heading", { name: "Tatiane", level: 1 })).toBeVisible({ timeout: 30_000 });
     await expect(page.getByText("Patrimônio líquido de Tatiane")).toBeVisible();
+    // O topo da página conta o mês dela com o mesmo número do selo de variação.
+    await expect(page.getByRole("heading", { name: "O que mudou em maio" })).toBeVisible();
+    await expect(page.getByText(sameChangeAs(await badgeAmount(page, "maio"), "Em maio, o patrimônio de Tatiane"))).toBeVisible();
     await expect(page.getByRole("heading", { name: "Mês a mês" })).toBeVisible();
     await expect(page.getByRole("rowheader", { name: "Patrimônio líquido" })).toBeVisible();
     // Sem a chave Família/pessoa: a página já é de uma pessoa só.
@@ -202,6 +231,20 @@ test.describe.serial("private finance app", () => {
     await expect(page.getByText("R$ 1.300,00").first()).toBeVisible();
   });
 });
+
+/** Valor do selo de variação do card de patrimônio ("-R$ 1.234 em maio" → "1.234"). */
+async function badgeAmount(page: Page, month: string) {
+  const badge = page.getByText(new RegExp(`^[+-]R\\$\\s[\\d.]+ em ${month}$`)).first();
+  await expect(badge).toBeVisible();
+  const amount = /R\$\s([\d.]+)/.exec((await badge.textContent()) ?? "")?.[1];
+  expect(amount).toBeTruthy();
+  return amount as string;
+}
+
+/** Frase que começa com `start` e cita o mesmo valor (o "R$" vem com espaço inseparável). */
+function sameChangeAs(amount: string, start: string) {
+  return new RegExp(`^${start} .*R\\$\\s${amount.replace(/\./g, "\\.")}\\b`);
+}
 
 /** Aceita o próximo window.confirm da página e devolve o texto exibido. */
 function nextDialogMessage(page: Page) {

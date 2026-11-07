@@ -73,18 +73,24 @@ export function MiniKpi({
   side,
   sideTone,
   sideCaption,
+  info,
 }: {
   label: string;
   value: string;
   side: string;
   sideTone: "positive" | "muted" | "negative";
   sideCaption: string;
+  /** Botão ⓘ com a explicação do número (InfoTip). */
+  info?: React.ReactNode;
 }) {
   const tones = { positive: "text-positive-text", muted: "text-muted", negative: "text-negative-text" };
   return (
     <div className="flex items-center justify-between gap-4 rounded-[14px] border border-edge bg-surface px-5 py-4">
       <div className="min-w-0">
-        <div className="text-xs font-semibold uppercase tracking-[0.14em] text-muted">{label}</div>
+        <div className="text-xs font-semibold uppercase tracking-[0.14em] text-muted">
+          {label}
+          {info ? <span className="-my-1 ml-1 inline-flex align-middle">{info}</span> : null}
+        </div>
         <div className="mt-1.5 truncate text-[22px] font-semibold tabular-nums text-snow">{value}</div>
       </div>
       <span className={clsx("shrink-0 text-right text-xs font-medium", tones[sideTone])}>

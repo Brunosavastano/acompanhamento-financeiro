@@ -3,11 +3,25 @@ import { clsx } from "clsx";
 import { ArrowDownRight, ArrowUpRight, CalendarCheck, TrendingUp } from "lucide-react";
 import { getRequiredPageHouseholdId } from "@/lib/authz";
 import { currency, number, percent } from "@/lib/format";
-import { asMonthStart, nextMonth } from "@/lib/date";
+import { asMonthStart, formatPeriod, nextMonth } from "@/lib/date";
+import { FAMILY_SCOPE } from "@/lib/evolution";
+import { explain, nominalDebtNote } from "@/lib/explanations";
+import {
+  DEBT_TO_ASSETS_BANDS,
+  DEFAULT_RESERVE_TARGET_MONTHS,
+  commitmentHealth,
+  debtHealth,
+  formatTargetMonths,
+  reserveHealth,
+  savingsHealth,
+} from "@/lib/health";
+import { buildMonthInsights } from "@/lib/insights";
 import { getDashboardData } from "@/server/metrics";
 import { getEvolutionData } from "@/server/evolution";
 import { CompositionPanel, HeroSparkline, VariationPanel } from "@/components/dashboard-panels";
 import { DebtEvolutionPanel, EvolutionExplorer } from "@/components/evolution-panels";
+import { InfoTip } from "@/components/info-tip";
+import { MonthInsightsPanel } from "@/components/month-insights";
 import { EmptyState, MiniKpi, PageBody, Panel, PanelTitle } from "@/components/ui";
 import { PageHeader } from "@/components/page-header";
 import { MonthPager } from "@/components/month-pager";
@@ -15,9 +29,6 @@ import { MonthPager } from "@/components/month-pager";
 // Tweaks de exibição do dashboard (ver handoff: props do componente).
 const MOSTRAR_MEDIA_VARIACAO = true;
 const JANELA_MEDIA_MESES: 6 | 12 = 12;
-
-// Meta padrão de meses de reserva quando não há meta cadastrada (handoff: "A meta da família é 6").
-const META_RESERVA_PADRAO = 6;
 
 function monthName(value: string | Date) {
   return new Intl.DateTimeFormat("pt-BR", { month: "long", timeZone: "UTC" }).format(asMonthStart(value));
@@ -54,18 +65,23 @@ function HealthCard({
   badge,
   tone,
   barPct,
+  info,
   children,
 }: {
   title: string;
   badge: string;
   tone: BadgeTone;
   barPct: number;
+  info?: React.ReactNode;
   children: React.ReactNode;
 }) {
   return (
     <div className="rounded-[10px] border border-edge-soft bg-surface-2 p-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <span className="text-[13px] font-semibold text-body">{title}</span>
+        <span className="text-[13px] font-semibold text-body">
+          {title}
+          {info ? <span className="-my-1 ml-1 inline-flex align-middle">{info}</span> : null}
+        </span>
         <span className={clsx("rounded-full px-2.5 py-[3px] text-[11px] font-semibold", badgeTones[tone])}>{badge}</span>
       </div>
       <p className="mt-2.5 text-xs leading-[18px] text-muted">{children}</p>
@@ -127,41 +143,35 @@ export default async function DashboardPage({
 
   const netWorthText = currency(kpis.netWorth);
   const decimalsAt = netWorthText.lastIndexOf(",");
-  const reserveTarget = data.reserveTargetMonths ?? META_RESERVA_PADRAO;
+  const reserveTarget = data.reserveTargetMonths ?? DEFAULT_RESERVE_TARGET_MONTHS;
   const reserveRatio = reserveTarget > 0 ? kpis.reserveMonths / reserveTarget : 0;
 
   const health = {
-    reserva:
-      reserveRatio >= 1
-        ? { badge: "Meta atingida", tone: "positive" as const }
-        : reserveRatio >= 0.75
-          ? { badge: "Quase lá", tone: "gold" as const }
-          : reserveRatio >= 0.4
-            ? { badge: "Em construção", tone: "gold" as const }
-            : { badge: "Atenção", tone: "negative" as const },
-    dividas:
-      kpis.debtToAssets <= 0.05
-        ? { badge: "Sob controle", tone: "positive" as const }
-        : kpis.debtToAssets <= 0.15
-          ? { badge: "Exige atenção", tone: "gold" as const }
-          : { badge: "Alto", tone: "negative" as const },
-    poupanca:
-      data.budget.budgetSavingsRate >= 0.2
-        ? { badge: "Ótimo ritmo", tone: "positive" as const }
-        : data.budget.budgetSavingsRate >= 0.1
-          ? { badge: "Bom ritmo", tone: "positive" as const }
-          : data.budget.budgetSavingsRate >= 0
-            ? { badge: "Ritmo baixo", tone: "gold" as const }
-            : { badge: "No vermelho", tone: "negative" as const },
-    renda:
-      data.budget.incomeCommitment <= 0.6
-        ? { badge: "Confortável", tone: "positive" as const }
-        : data.budget.incomeCommitment <= 0.85
-          ? { badge: "Atenção", tone: "negative" as const }
-          : { badge: "Crítico", tone: "negative" as const },
+    reserva: reserveHealth(reserveRatio),
+    dividas: debtHealth(kpis.debtToAssets),
+    poupanca: savingsHealth(data.budget.budgetSavingsRate),
+    renda: commitmentHealth(data.budget.incomeCommitment),
   };
 
   const variationPositive = kpis.monthlyVariation >= 0;
+
+  // "O que mudou" e pontos de atenção: os números do topo saem dos mesmos
+  // valores dos cards abaixo (variação do card de patrimônio, meses de reserva).
+  const previousReserve = currentIndex > 0 ? data.charts.reserveMonths[currentIndex - 1] : undefined;
+  const insights = buildMonthInsights({
+    evolution,
+    scope: FAMILY_SCOPE,
+    netWorth: { value: kpis.netWorth, change: kpis.previousPeriodMonth ? kpis.monthlyVariation : null },
+    reserve: {
+      months: kpis.reserveMonths,
+      previousMonths: previousReserve ? Number(previousReserve.value) : null,
+      targetMonths: reserveTarget,
+      cashTotal: kpis.cashTotal,
+      monthlyExpenses: data.budget.expenseTotal,
+    },
+    // O aviso de mês por fechar só faz sentido olhando o último mês fechado.
+    today: data.periodMonth === latestPeriod ? formatPeriod(new Date()).slice(0, 7) : null,
+  });
 
   return (
     <>
@@ -185,12 +195,18 @@ export default async function DashboardPage({
         }
       />
       <PageBody>
-        <div className="grid gap-4 lg:grid-cols-[1.5fr_1fr]">
+        <MonthInsightsPanel insights={insights} family />
+
+        <div className="mt-4 grid gap-4 lg:grid-cols-[1.5fr_1fr]">
           <section className="relative min-w-0 overflow-hidden rounded-[14px] border border-edge bg-[linear-gradient(160deg,#101A30_0%,#0E1526_55%)] p-7">
             <div className="flex items-start justify-between gap-4">
               <div>
                 <div className="text-xs font-semibold uppercase tracking-[0.16em] text-muted">
-                  Patrimônio líquido da família
+                  Patrimônio líquido da{" "}
+                  <span className="whitespace-nowrap">
+                    família
+                    <InfoTip explanation={explain("patrimonio")} className="-my-1 ml-1" />
+                  </span>
                 </div>
                 <div className="mt-2.5 whitespace-nowrap text-[clamp(30px,3vw,44px)] font-semibold tracking-[-0.02em] tabular-nums text-snow">
                   {decimalsAt >= 0 ? (
@@ -246,6 +262,15 @@ export default async function DashboardPage({
               side={`${number(kpis.reserveMonths, 1)} meses`}
               sideTone="positive"
               sideCaption="de reserva"
+              info={
+                <InfoTip
+                  explanation={explain("caixa", [
+                    data.budget.expenseTotal > 0
+                      ? `Os meses de reserva dividem esse caixa pelos gastos previstos no orçamento (${brl0(data.budget.expenseTotal)} por mês).`
+                      : null,
+                  ])}
+                />
+              }
             />
             <MiniKpi
               label="Investimentos"
@@ -253,6 +278,11 @@ export default async function DashboardPage({
               side={percent(kpis.investmentsToAssets, 1)}
               sideTone="muted"
               sideCaption="dos ativos"
+              info={
+                <InfoTip
+                  explanation={explain("investimentos", ["“Dos ativos” mostra quanto de tudo o que a família tem (caixa + investimentos) está investido."])}
+                />
+              }
             />
             <MiniKpi
               label="Dívidas do cartão"
@@ -260,6 +290,14 @@ export default async function DashboardPage({
               side={percent(kpis.debtToAssets, 1)}
               sideTone="negative"
               sideCaption="dos ativos"
+              info={
+                <InfoTip
+                  explanation={explain("dividas", [
+                    nominalDebtNote(data.debt.nominalTotal),
+                    "“Dos ativos” compara a dívida com tudo o que a família tem (caixa + investimentos).",
+                  ])}
+                />
+              }
             />
           </div>
         </div>
@@ -275,17 +313,19 @@ export default async function DashboardPage({
               badge={health.reserva.badge}
               tone={health.reserva.tone}
               barPct={reserveRatio * 100}
+              info={<InfoTip explanation={explain("reserva")} />}
             >
               Hoje o caixa cobre <strong className="font-semibold text-snow">{number(kpis.reserveMonths, 1)} meses</strong> de
-              gastos. A meta da família é {number(reserveTarget, 0)}.
+              gastos. A meta da família é {formatTargetMonths(reserveTarget)}.
             </HealthCard>
             <HealthCard
               title="Dívidas"
               badge={health.dividas.badge}
               tone={health.dividas.tone}
               barPct={kpis.debtToAssets * 100 * 5}
+              info={<InfoTip explanation={explain("saudeDividas")} />}
             >
-              As faturas futuras equivalem a{kpis.debtToAssets <= 0.05 ? " só" : ""}{" "}
+              As faturas futuras equivalem a{kpis.debtToAssets <= DEBT_TO_ASSETS_BANDS.controlled ? " só" : ""}{" "}
               <strong className="font-semibold text-snow">{percent(kpis.debtToAssets, 1)}</strong> do que a família possui.
             </HealthCard>
             {/* Número do ORÇAMENTO (planejado), não o que de fato sobrou — o realizado é a variação do patrimônio, no topo. */}
@@ -294,6 +334,7 @@ export default async function DashboardPage({
               badge={health.poupanca.badge}
               tone={health.poupanca.tone}
               barPct={data.budget.budgetSavingsRate * 100 * 2.5}
+              info={<InfoTip explanation={explain("sobraPlanejada")} />}
             >
               {data.budget.budgetSavingsRate >= 0 ? (
                 <>
@@ -312,6 +353,7 @@ export default async function DashboardPage({
               badge={health.renda.badge}
               tone={health.renda.tone}
               barPct={data.budget.incomeCommitment * 100}
+              info={<InfoTip explanation={explain("rendaComprometida")} />}
             >
               <strong className="font-semibold text-snow">{percent(data.budget.incomeCommitment, 1)}</strong> da renda já tem
               destino entre contas fixas e cartão.
@@ -333,7 +375,10 @@ export default async function DashboardPage({
             <CompositionPanel scopes={data.composition} />
             <Panel className="flex-1">
               <div className="flex items-center justify-between gap-3">
-                <PanelTitle>Metas em andamento</PanelTitle>
+                <div className="flex items-center gap-1.5">
+                  <PanelTitle>Metas em andamento</PanelTitle>
+                  <InfoTip explanation={explain("metas")} />
+                </div>
                 <Link href="/metas" className="focus-ring text-xs font-semibold text-gold hover:text-gold-light">
                   Ver todas
                 </Link>
